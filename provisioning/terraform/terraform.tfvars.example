@@ -9,8 +9,7 @@ ssh_public_keys = [
 k3s_token = "REPLACE_ME"
 
 # One converged VM fits the actual 16 GB host. A three-VM layout would exhaust RAM before
-# any application starts. The 700 GB thin-provisioned data disk leaves local-lvm headroom;
-# verify `pvesm status` on Proxmox and reduce it if local-lvm has less than about 780 GB free.
+# any application starts. Verify `pvesm status` before changing the 600 GB data disk.
 nodes = {
   "k3s-home-01" = {
     proxmox_node = "home"
@@ -21,7 +20,7 @@ nodes = {
     cores        = 12
     memory_mb    = 10240
     disk_gb      = 64
-    data_disk_gb = 700
+    data_disk_gb = 600
     data_disk_serial = "HOMEFALLOUT_DATA"
     description  = "Single-node k3s: media, Jellyfin, Immich, and GitOps"
     labels       = { "node-role.kubernetes.io/worker" = "true" }

@@ -8,3 +8,4 @@ k3s_disable:
 # by serial, never by a changeable /dev/sdX path.
 initialize_data_disk: true
 data_mount_path: /mnt/data
+k3s_local_storage_path: /mnt/data/k3s-storage

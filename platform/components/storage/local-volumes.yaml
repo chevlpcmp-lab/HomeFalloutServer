@@ -1,4 +1,4 @@
-# Both capacities are binding metadata, not quotas: these directories share one 700 GB disk.
+# Both capacities are binding metadata, not quotas: these directories share one 600 GB disk.
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
@@ -29,7 +29,7 @@ metadata:
   name: media-data
 spec:
   capacity:
-    storage: 600Gi
+    storage: 500Gi
   accessModes: [ReadWriteOnce]
   persistentVolumeReclaimPolicy: Retain
   storageClassName: media-local
@@ -54,7 +54,7 @@ spec:
   volumeName: media-data
   resources:
     requests:
-      storage: 600Gi
+      storage: 500Gi
 ---
 apiVersion: v1
 kind: PersistentVolume
@@ -62,7 +62,7 @@ metadata:
   name: photos-data
 spec:
   capacity:
-    storage: 600Gi
+    storage: 500Gi
   accessModes: [ReadWriteOnce]
   persistentVolumeReclaimPolicy: Retain
   storageClassName: photos-local
@@ -87,4 +87,4 @@ spec:
   volumeName: photos-data
   resources:
     requests:
-      storage: 600Gi
+      storage: 500Gi

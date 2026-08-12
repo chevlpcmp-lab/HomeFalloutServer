@@ -19,7 +19,7 @@ redundancy while wasting memory on three operating systems. It is not highly ava
 NVMe, Proxmox host, VM, and k3s node are all failure domains.
 
 The VM gets 10 GB RAM and 12 of the i7-14700's 28 logical CPUs. Proxmox retains roughly 5 GB RAM.
-The VM uses a 64 GB OS disk plus a 700 GB data disk. Both are thin volumes on the same physical
+The VM uses a 64 GB OS disk plus a 600 GB data disk. Both are thin volumes on the same physical
 NVMe; the separation is operational, not redundant.
 
 ## VPN boundary
@@ -47,4 +47,3 @@ Configure the router so DHCP ends at or below `10.0.0.199`. The repository reser
 | `10.0.0.230-10.0.0.250` | MetalLB media and photo services |
 
 Never add a router DHCP reservation inside either MetalLB range.
-

@@ -1,5 +1,7 @@
 [CmdletBinding()]
-param()
+param(
+    [switch]$GitOpsOnly
+)
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -56,8 +58,13 @@ stringData:
   sshPrivateKey: |
 $indentedPrivateKey
 "@
-    Set-Content -LiteralPath $argocdRepoSecretPath -Value $argocdSecret -Encoding utf8NoBOM
+    Set-Content -LiteralPath $argocdRepoSecretPath -Value $argocdSecret -Encoding UTF8
     Write-Host "Created $argocdRepoSecretPath (gitignored)."
+}
+
+if ($GitOpsOnly) {
+    Write-Host 'Argo CD repository access is prepared.'
+    exit 0
 }
 
 if (-not (Test-Path -LiteralPath $tfvarsPath)) {
@@ -88,14 +95,14 @@ nodes = {
     cores           = 12
     memory_mb       = 10240
     disk_gb         = 64
-    data_disk_gb    = 700
+    data_disk_gb    = 600
     data_disk_serial = "HOMEFALLOUT_DATA"
     description     = "Single-node k3s: media, Jellyfin, Immich, and GitOps"
     labels          = { "node-role.kubernetes.io/worker" = "true" }
   }
 }
 "@
-    Set-Content -LiteralPath $tfvarsPath -Value $tfvars -Encoding utf8NoBOM
+    Set-Content -LiteralPath $tfvarsPath -Value $tfvars -Encoding UTF8
     Write-Host "Created $tfvarsPath (gitignored)."
 }
 
@@ -128,7 +135,7 @@ type: Opaque
 stringData:
   SECRET_ENCRYPTION_KEY: "$homarrKey"
 "@
-    Set-Content -LiteralPath $mediaSecretPath -Value $mediaSecret -Encoding utf8NoBOM
+    Set-Content -LiteralPath $mediaSecretPath -Value $mediaSecret -Encoding UTF8
     Write-Host "Created $mediaSecretPath (gitignored)."
 }
 
@@ -147,7 +154,7 @@ stringData:
   DB_PASSWORD: "$dbPassword"
   DB_DATABASE_NAME: "immich"
 "@
-    Set-Content -LiteralPath $immichSecretPath -Value $immichSecret -Encoding utf8NoBOM
+    Set-Content -LiteralPath $immichSecretPath -Value $immichSecret -Encoding UTF8
     Write-Host "Created $immichSecretPath (gitignored)."
 }
 

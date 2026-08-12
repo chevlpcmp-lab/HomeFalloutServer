@@ -8,7 +8,7 @@ and Jellyfin.
 ## Hardware-specific design
 
 This host has an i7-14700, 16 GB RAM, and one 1 TB NVMe. The configuration creates one 10 GB k3s
-VM instead of three pretend-HA VMs. It attaches a 64 GB OS disk and a 700 GB data disk. See
+VM instead of three pretend-HA VMs. It attaches a 64 GB OS disk and a 600 GB data disk. See
 [storage](docs/storage.md) for realistic capacity and upgrade advice.
 
 ## Service addresses
@@ -56,6 +56,13 @@ laptop with:
 ```powershell
 kubectl --kubeconfig provisioning/ansible/kubeconfig get nodes -o wide
 kubectl --kubeconfig provisioning/ansible/kubeconfig get pods -A
+```
+
+Or use the included wrapper without changing any existing Docker Desktop kubeconfig:
+
+```powershell
+.\scripts\k.ps1 get nodes -o wide
+.\scripts\k.ps1 get pods -A
 ```
 
 To make it the default for the current PowerShell session:

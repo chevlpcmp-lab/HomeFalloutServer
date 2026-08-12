@@ -1,6 +1,6 @@
 # Storage
 
-Terraform attaches one 700 GB thin-provisioned virtual data disk to `k3s-home-01`. Ansible locates
+Terraform attaches one 600 GB thin-provisioned virtual data disk to `k3s-home-01`. Ansible locates
 it using the unique `HOMEFALLOUT_DATA` serial, formats it only when it is blank, and mounts it at
 `/mnt/data`. It refuses to guess a `/dev/sdX` device.
 
@@ -35,7 +35,8 @@ and Proxmox thin pool. Keep at least 15–20% free; a full thin pool can damage 
 
 Application databases/configuration use the `local-path-retain` StorageClass. Deleting a PVC does
 not automatically delete its backing PV, but you must still back up those directories and the
-Immich Postgres database; a `Retain` policy is not itself a backup.
+Immich Postgres database; a `Retain` policy is not itself a backup. Ansible configures k3s's local
+provisioner to use `/mnt/data/k3s-storage`, keeping these PVCs off the 64 GB OS disk.
 
 ## Recommended upgrade order
 
@@ -46,7 +47,6 @@ Immich Postgres database; a `Retain` policy is not itself a backup.
 3. Add an external backup target for Immich originals, Postgres, and application configuration.
    Another internal disk, a USB disk used only for backups, or encrypted cloud backup is useful.
 
-Until an HDD is added, expect roughly 550–650 GB of practical media/photo capacity after Proxmox,
+Until an HDD is added, expect roughly 450–520 GB of practical media/photo capacity after Proxmox,
 the VM OS, application data, download staging, and safety headroom. Configure qBittorrent to remove
 completed downloads after import and use Maintainerr to cap library growth.
-

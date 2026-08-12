@@ -12,9 +12,9 @@ pvesm status
 lvs
 ```
 
-The default configuration requests a 64 GB OS disk and a 700 GB thin-provisioned data disk on
+The default configuration requests a 64 GB OS disk and a 600 GB thin-provisioned data disk on
 `local-lvm`. Reduce `data_disk_gb` in `terraform.tfvars` if the LVM thin pool is smaller than about
-780 GB. Thin provisioning does not create extra physical capacity: keep the underlying pool below
+700 GB. Thin provisioning does not create extra physical capacity: keep the underlying pool below
 80–85% usage.
 
 ## 2. Enable image imports

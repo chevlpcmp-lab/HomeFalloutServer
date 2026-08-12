@@ -97,6 +97,7 @@
         - "{{ data_mount_path }}/media/library/movies"
         - "{{ data_mount_path }}/media/library/tv"
         - "{{ data_mount_path }}/photos"
+        - "{{ k3s_local_storage_path }}"
 
     - name: Download k3s installer
       ansible.builtin.get_url:
@@ -124,6 +125,7 @@
           --cluster-init
           --token {{ k3s_token | quote }}
           --write-kubeconfig-mode 0644
+          --default-local-storage-path {{ k3s_local_storage_path }}
           {% for component in k3s_disable %} --disable {{ component }}{% endfor %}
           {{ label_args }} {{ taint_args }}
       environment:
@@ -147,6 +149,7 @@
           --server https://{{ primary_server_ip }}:6443
           --token {{ k3s_token | quote }}
           --write-kubeconfig-mode 0644
+          --default-local-storage-path {{ k3s_local_storage_path }}
           {% for component in k3s_disable %} --disable {{ component }}{% endfor %}
           {{ label_args }} {{ taint_args }}
       environment:
