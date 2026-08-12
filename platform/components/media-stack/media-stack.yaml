@@ -1,0 +1,183 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: media-stack
+  namespace: media
+  labels:
+    app: media-stack
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: media-stack
+  template:
+    metadata:
+      labels:
+        app: media-stack
+    spec:
+      nodeSelector:
+        homelab.charles/pool: converged
+      securityContext:
+        fsGroup: 1000
+
+      # A restartable init container is a Kubernetes-native sidecar. Its startup probe
+      # must pass before the app containers start, preventing clear-net startup leaks.
+      initContainers:
+        - name: gluetun
+          image: qmcgaw/gluetun:v3.41.1
+          restartPolicy: Always
+          securityContext:
+            capabilities:
+              add: [NET_ADMIN]
+          env:
+            - name: VPN_SERVICE_PROVIDER
+              valueFrom: { secretKeyRef: { name: gluetun-vpn, key: VPN_SERVICE_PROVIDER } }
+            - name: VPN_TYPE
+              valueFrom: { secretKeyRef: { name: gluetun-vpn, key: VPN_TYPE } }
+            - name: WIREGUARD_PRIVATE_KEY
+              valueFrom: { secretKeyRef: { name: gluetun-vpn, key: WIREGUARD_PRIVATE_KEY } }
+            - name: SERVER_COUNTRIES
+              valueFrom: { secretKeyRef: { name: gluetun-vpn, key: SERVER_COUNTRIES } }
+            - name: TZ
+              value: America/Toronto
+            - name: HTTP_CONTROL_SERVER_ADDRESS
+              value: :8000
+            - name: FIREWALL_INPUT_PORTS
+              value: "5055,6246,6767,7575,7878,8000,8080,8191,8989,9696"
+            # These private ranges bypass the VPN so LAN clients and Kubernetes probes
+            # can reach the UIs. All public destinations still use the tunnel.
+            - name: FIREWALL_OUTBOUND_SUBNETS
+              value: "10.0.0.0/24,10.42.0.0/16,10.43.0.0/16"
+          startupProbe:
+            httpGet: { path: /v1/publicip/ip, port: 8000 }
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            httpGet: { path: /v1/publicip/ip, port: 8000 }
+            periodSeconds: 15
+            failureThreshold: 4
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+
+      containers:
+        - name: radarr
+          image: lscr.io/linuxserver/radarr:6.3.0.10514-ls311
+          env: &lsio-env
+            - { name: PUID, value: "1000" }
+            - { name: PGID, value: "1000" }
+            - { name: TZ, value: America/Toronto }
+          ports: [{ name: radarr, containerPort: 7878 }]
+          startupProbe: { tcpSocket: { port: 7878 }, periodSeconds: 5, failureThreshold: 30 }
+          volumeMounts:
+            - { name: config-radarr, mountPath: /config }
+            - { name: media-data, mountPath: /data }
+          resources: &arr-resources
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: "1", memory: 1Gi }
+
+        - name: sonarr
+          image: lscr.io/linuxserver/sonarr:4.0.19.2979-ls320
+          env: *lsio-env
+          ports: [{ name: sonarr, containerPort: 8989 }]
+          startupProbe: { tcpSocket: { port: 8989 }, periodSeconds: 5, failureThreshold: 30 }
+          volumeMounts:
+            - { name: config-sonarr, mountPath: /config }
+            - { name: media-data, mountPath: /data }
+          resources: *arr-resources
+
+        - name: prowlarr
+          image: lscr.io/linuxserver/prowlarr:2.4.0.5397-ls154
+          env: *lsio-env
+          ports: [{ name: prowlarr, containerPort: 9696 }]
+          startupProbe: { tcpSocket: { port: 9696 }, periodSeconds: 5, failureThreshold: 30 }
+          volumeMounts:
+            - { name: config-prowlarr, mountPath: /config }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+
+        - name: qbittorrent
+          image: lscr.io/linuxserver/qbittorrent:5.2.3_v2.0.13-ls468
+          env:
+            - { name: PUID, value: "1000" }
+            - { name: PGID, value: "1000" }
+            - { name: TZ, value: America/Toronto }
+            - { name: WEBUI_PORT, value: "8080" }
+          ports:
+            - { name: qbit-ui, containerPort: 8080 }
+          startupProbe: { tcpSocket: { port: 8080 }, periodSeconds: 5, failureThreshold: 30 }
+          volumeMounts:
+            - { name: config-qbittorrent, mountPath: /config }
+            - { name: media-data, mountPath: /data }
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: "2", memory: 2Gi }
+
+        - name: flaresolverr
+          image: ghcr.io/flaresolverr/flaresolverr:v3.5.0
+          env:
+            - { name: LOG_LEVEL, value: info }
+            - { name: TZ, value: America/Toronto }
+          ports: [{ name: flaresolverr, containerPort: 8191 }]
+          startupProbe: { tcpSocket: { port: 8191 }, periodSeconds: 5, failureThreshold: 30 }
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: "1", memory: 1Gi }
+
+        - name: bazarr
+          image: lscr.io/linuxserver/bazarr:latest
+          env: *lsio-env
+          ports: [{ name: bazarr, containerPort: 6767 }]
+          startupProbe: { tcpSocket: { port: 6767 }, periodSeconds: 5, failureThreshold: 30 }
+          volumeMounts:
+            - { name: config-bazarr, mountPath: /config }
+            - { name: media-data, mountPath: /data }
+          resources: *arr-resources
+
+        - name: seerr
+          image: ghcr.io/seerr-team/seerr:latest
+          env:
+            - { name: TZ, value: America/Toronto }
+            - { name: PORT, value: "5055" }
+          ports: [{ name: seerr, containerPort: 5055 }]
+          startupProbe: { tcpSocket: { port: 5055 }, periodSeconds: 5, failureThreshold: 30 }
+          volumeMounts:
+            - { name: config-seerr, mountPath: /app/config }
+          resources: *arr-resources
+
+        - name: maintainerr
+          image: ghcr.io/maintainerr/maintainerr:latest
+          env:
+            - { name: TZ, value: America/Toronto }
+          ports: [{ name: maintainerr, containerPort: 6246 }]
+          startupProbe: { tcpSocket: { port: 6246 }, periodSeconds: 5, failureThreshold: 30 }
+          readinessProbe: { httpGet: { path: /api/health/ready, port: 6246 }, periodSeconds: 15 }
+          volumeMounts:
+            - { name: config-maintainerr, mountPath: /opt/data }
+          resources: *arr-resources
+
+        - name: homarr
+          image: ghcr.io/homarr-labs/homarr:latest
+          env:
+            - { name: TZ, value: America/Toronto }
+            - name: SECRET_ENCRYPTION_KEY
+              valueFrom: { secretKeyRef: { name: homarr-secrets, key: SECRET_ENCRYPTION_KEY } }
+          ports: [{ name: homarr, containerPort: 7575 }]
+          startupProbe: { tcpSocket: { port: 7575 }, periodSeconds: 5, failureThreshold: 30 }
+          volumeMounts:
+            - { name: config-homarr, mountPath: /appdata }
+          resources: *arr-resources
+
+      volumes:
+        - { name: media-data, persistentVolumeClaim: { claimName: media-data } }
+        - { name: config-radarr, persistentVolumeClaim: { claimName: config-radarr } }
+        - { name: config-sonarr, persistentVolumeClaim: { claimName: config-sonarr } }
+        - { name: config-prowlarr, persistentVolumeClaim: { claimName: config-prowlarr } }
+        - { name: config-qbittorrent, persistentVolumeClaim: { claimName: config-qbittorrent } }
+        - { name: config-bazarr, persistentVolumeClaim: { claimName: config-bazarr } }
+        - { name: config-seerr, persistentVolumeClaim: { claimName: config-seerr } }
+        - { name: config-maintainerr, persistentVolumeClaim: { claimName: config-maintainerr } }
+        - { name: config-homarr, persistentVolumeClaim: { claimName: config-homarr } }

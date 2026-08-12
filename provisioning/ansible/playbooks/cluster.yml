@@ -1,0 +1,201 @@
+---
+- name: Prepare every k3s node
+  hosts: k3s_cluster
+  become: true
+  tasks:
+    - name: Install host prerequisites
+      ansible.builtin.apt:
+        name:
+          - curl
+          - nfs-common
+          - qemu-guest-agent
+        state: present
+        update_cache: true
+
+    - name: Inspect unmounted block devices
+      ansible.builtin.command: lsblk --json --nodeps --output PATH,SERIAL,SIZE,TYPE
+      register: block_devices
+      changed_when: false
+      when: data_disk_serial | default('') | length > 0
+
+    - name: Resolve the Terraform data disk by its unique serial
+      ansible.builtin.set_fact:
+        data_disk_device: >-
+          {{ ((block_devices.stdout | from_json).blockdevices
+              | selectattr('serial', 'equalto', data_disk_serial)
+              | selectattr('type', 'equalto', 'disk')
+              | map(attribute='path') | list | first) | default('') }}
+      when: data_disk_serial | default('') | length > 0
+
+    - name: Refuse to guess which disk holds application data
+      ansible.builtin.assert:
+        that:
+          - data_disk_device | length > 0
+        fail_msg: >-
+          No whole disk with serial {{ data_disk_serial }} was found. Check `lsblk -o
+          PATH,SERIAL,SIZE,TYPE` before continuing; this playbook will not guess a device.
+      when: data_disk_serial | default('') | length > 0
+
+    - name: Check whether the data disk already has a filesystem
+      ansible.builtin.command: "blkid -s TYPE -o value {{ data_disk_device }}"
+      register: data_disk_filesystem
+      changed_when: false
+      failed_when: false
+      when: data_disk_device | default('') | length > 0
+
+    - name: Initialize the blank Terraform data disk as ext4
+      ansible.builtin.command: "mkfs.ext4 -L homefallout-data {{ data_disk_device }}"
+      when:
+        - initialize_data_disk | bool
+        - data_disk_device | default('') | length > 0
+        - data_disk_filesystem.rc != 0
+
+    - name: Refuse an unexpected existing filesystem
+      ansible.builtin.assert:
+        that:
+          - data_disk_filesystem.stdout in ['ext4']
+        fail_msg: >-
+          The data disk already contains {{ data_disk_filesystem.stdout | default('an unknown
+          filesystem') }}. It was not changed; inspect it manually before continuing.
+      when:
+        - data_disk_device | default('') | length > 0
+        - data_disk_filesystem.rc == 0
+
+    - name: Create the data mount point
+      ansible.builtin.file:
+        path: "{{ data_mount_path }}"
+        state: directory
+        mode: "0755"
+
+    - name: Persist the data disk mount by filesystem label
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        regexp: '^LABEL=homefallout-data\s+'
+        line: "LABEL=homefallout-data {{ data_mount_path }} ext4 defaults,noatime 0 2"
+        state: present
+
+    - name: Check whether the data disk is mounted
+      ansible.builtin.command: "findmnt --mountpoint {{ data_mount_path }}"
+      register: data_mount_status
+      changed_when: false
+      failed_when: false
+
+    - name: Mount the application data disk
+      ansible.builtin.command: "mount {{ data_mount_path }}"
+      when: data_mount_status.rc != 0
+
+    - name: Create bulk data layout
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "1000"
+        group: "1000"
+        mode: "0775"
+      loop:
+        - "{{ data_mount_path }}/media/downloads/incomplete"
+        - "{{ data_mount_path }}/media/downloads/complete"
+        - "{{ data_mount_path }}/media/library/movies"
+        - "{{ data_mount_path }}/media/library/tv"
+        - "{{ data_mount_path }}/photos"
+
+    - name: Download k3s installer
+      ansible.builtin.get_url:
+        url: https://get.k3s.io
+        dest: /usr/local/src/install-k3s.sh
+        mode: "0755"
+
+- name: Initialize the first control plane
+  hosts: server
+  become: true
+  serial: 1
+  vars:
+    is_primary: "{{ ansible_host == primary_server_ip }}"
+    label_args: >-
+      --node-label topology.kubernetes.io/zone={{ node_zone }}
+      --node-label homelab.charles/pool={{ node_pool }}
+      {% for key, value in node_labels.items() %} --node-label {{ key }}={{ value }}{% endfor %}
+    taint_args: >-
+      {% for taint in node_taints %} --node-taint {{ taint }}{% endfor %}
+  tasks:
+    - name: Install primary k3s server
+      ansible.builtin.command:
+        cmd: >-
+          /usr/local/src/install-k3s.sh server
+          --cluster-init
+          --token {{ k3s_token | quote }}
+          --write-kubeconfig-mode 0644
+          {% for component in k3s_disable %} --disable {{ component }}{% endfor %}
+          {{ label_args }} {{ taint_args }}
+      environment:
+        INSTALL_K3S_CHANNEL: "{{ k3s_channel }}"
+      when: is_primary
+      args:
+        creates: /etc/systemd/system/k3s.service
+      no_log: true
+
+    - name: Wait for the Kubernetes API
+      ansible.builtin.wait_for:
+        host: "{{ primary_server_ip }}"
+        port: 6443
+        timeout: 180
+      when: is_primary
+
+    - name: Join additional k3s servers
+      ansible.builtin.command:
+        cmd: >-
+          /usr/local/src/install-k3s.sh server
+          --server https://{{ primary_server_ip }}:6443
+          --token {{ k3s_token | quote }}
+          --write-kubeconfig-mode 0644
+          {% for component in k3s_disable %} --disable {{ component }}{% endfor %}
+          {{ label_args }} {{ taint_args }}
+      environment:
+        INSTALL_K3S_CHANNEL: "{{ k3s_channel }}"
+      when: not is_primary
+      args:
+        creates: /etc/systemd/system/k3s.service
+      no_log: true
+
+- name: Join k3s workers
+  hosts: agent
+  become: true
+  vars:
+    label_args: >-
+      --node-label topology.kubernetes.io/zone={{ node_zone }}
+      --node-label homelab.charles/pool={{ node_pool }}
+      {% for key, value in node_labels.items() %} --node-label {{ key }}={{ value }}{% endfor %}
+    taint_args: >-
+      {% for taint in node_taints %} --node-taint {{ taint }}{% endfor %}
+  tasks:
+    - name: Install k3s agent
+      ansible.builtin.command:
+        cmd: >-
+          /usr/local/src/install-k3s.sh agent
+          --server https://{{ primary_server_ip }}:6443
+          --token {{ k3s_token | quote }}
+          {{ label_args }} {{ taint_args }}
+      environment:
+        INSTALL_K3S_CHANNEL: "{{ k3s_channel }}"
+      args:
+        creates: /etc/systemd/system/k3s-agent.service
+      no_log: true
+
+- name: Fetch the admin kubeconfig
+  hosts: server
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Read kubeconfig from the primary
+      ansible.builtin.slurp:
+        src: /etc/rancher/k3s/k3s.yaml
+      register: kubeconfig_raw
+      when: ansible_host == primary_server_ip
+
+    - name: Write kubeconfig beside the inventory
+      ansible.builtin.copy:
+        content: "{{ kubeconfig_raw.content | b64decode | replace('127.0.0.1', primary_server_ip) }}"
+        dest: "{{ playbook_dir }}/../kubeconfig"
+        mode: "0600"
+      delegate_to: localhost
+      become: false
+      when: ansible_host == primary_server_ip

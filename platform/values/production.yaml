@@ -1,0 +1,42 @@
+repo:
+  url: git@github.com:chevlpcmp-lab/HomeFalloutServer.git
+  revision: main
+
+components:
+  - name: namespaces
+    namespace: argocd
+    wave: 0
+    path: platform/components/namespaces
+
+  - name: metallb
+    namespace: networking
+    wave: 10
+    chart:
+      repoURL: https://metallb.github.io/metallb
+      name: metallb
+      version: "0.15.3"
+
+  - name: metallb-config
+    namespace: networking
+    wave: 11
+    path: platform/components/metallb-config
+
+  - name: storage
+    namespace: media
+    wave: 20
+    path: platform/components/storage
+
+  - name: media-stack
+    namespace: media
+    wave: 30
+    path: platform/components/media-stack
+
+  - name: jellyfin
+    namespace: media
+    wave: 31
+    path: platform/components/jellyfin
+
+  - name: immich
+    namespace: photos
+    wave: 32
+    path: platform/components/immich

@@ -1,0 +1,10 @@
+---
+k3s_channel: stable
+k3s_disable:
+  - traefik
+  - servicelb
+
+# Terraform attaches one blank data disk with this exact serial. The prepare play identifies it
+# by serial, never by a changeable /dev/sdX path.
+initialize_data_disk: true
+data_mount_path: /mnt/data

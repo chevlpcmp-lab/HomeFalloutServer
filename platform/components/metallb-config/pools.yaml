@@ -1,0 +1,30 @@
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: platform
+  namespace: networking
+spec:
+  autoAssign: false
+  addresses:
+    - 10.0.0.200-10.0.0.229
+---
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: media-and-photos
+  namespace: networking
+spec:
+  autoAssign: false
+  addresses:
+    - 10.0.0.230-10.0.0.250
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: lan
+  namespace: networking
+spec:
+  ipAddressPools:
+    - platform
+    - media-and-photos
+

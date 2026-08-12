@@ -1,0 +1,6 @@
+apiVersion: v2
+name: homefallout-platform
+description: Argo CD application generator for the HomeFalloutServer homelab
+type: application
+version: 0.1.0
+

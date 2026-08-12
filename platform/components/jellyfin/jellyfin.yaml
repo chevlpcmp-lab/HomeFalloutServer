@@ -1,0 +1,78 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jellyfin-config
+  namespace: media
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path-retain
+  resources: { requests: { storage: 20Gi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jellyfin-cache
+  namespace: media
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path-retain
+  resources: { requests: { storage: 50Gi } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jellyfin
+  namespace: media
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: jellyfin }
+  template:
+    metadata:
+      labels: { app: jellyfin }
+    spec:
+      nodeSelector:
+        homelab.charles/pool: converged
+      containers:
+        - name: jellyfin
+          image: docker.io/jellyfin/jellyfin:latest
+          env:
+            - { name: TZ, value: America/Toronto }
+            - { name: JELLYFIN_PublishedServerUrl, value: "http://10.0.0.230:8096" }
+          ports:
+            - { name: http, containerPort: 8096 }
+          startupProbe:
+            httpGet: { path: /health, port: 8096 }
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: { path: /health, port: 8096 }
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: { path: /health, port: 8096 }
+            periodSeconds: 30
+          volumeMounts:
+            - { name: config, mountPath: /config }
+            - { name: cache, mountPath: /cache }
+            - { name: media-data, mountPath: /media, readOnly: true }
+          resources:
+            requests: { cpu: 300m, memory: 768Mi }
+            limits: { cpu: "4", memory: 3Gi }
+      volumes:
+        - { name: config, persistentVolumeClaim: { claimName: jellyfin-config } }
+        - { name: cache, persistentVolumeClaim: { claimName: jellyfin-cache } }
+        - { name: media-data, persistentVolumeClaim: { claimName: media-data } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jellyfin
+  namespace: media
+  annotations:
+    metallb.io/loadBalancerIPs: "10.0.0.230"
+spec:
+  type: LoadBalancer
+  selector: { app: jellyfin }
+  ports:
+    - { name: http, port: 8096, targetPort: 8096 }

@@ -1,0 +1,99 @@
+# Every Service selects the same pod. Kubernetes containers in that pod share Gluetun's
+# network namespace, but each LAN UI keeps a memorable dedicated address.
+apiVersion: v1
+kind: Service
+metadata:
+  name: homarr
+  namespace: media
+  annotations: { metallb.io/loadBalancerIPs: "10.0.0.220" }
+spec:
+  type: LoadBalancer
+  selector: { app: media-stack }
+  ports: [{ name: http, port: 80, targetPort: 7575 }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: radarr
+  namespace: media
+  annotations: { metallb.io/loadBalancerIPs: "10.0.0.231" }
+spec:
+  type: LoadBalancer
+  selector: { app: media-stack }
+  ports: [{ name: http, port: 80, targetPort: 7878 }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sonarr
+  namespace: media
+  annotations: { metallb.io/loadBalancerIPs: "10.0.0.232" }
+spec:
+  type: LoadBalancer
+  selector: { app: media-stack }
+  ports: [{ name: http, port: 80, targetPort: 8989 }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prowlarr
+  namespace: media
+  annotations: { metallb.io/loadBalancerIPs: "10.0.0.233" }
+spec:
+  type: LoadBalancer
+  selector: { app: media-stack }
+  ports: [{ name: http, port: 80, targetPort: 9696 }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qbittorrent
+  namespace: media
+  annotations: { metallb.io/loadBalancerIPs: "10.0.0.234" }
+spec:
+  type: LoadBalancer
+  selector: { app: media-stack }
+  ports: [{ name: http, port: 80, targetPort: 8080 }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bazarr
+  namespace: media
+  annotations: { metallb.io/loadBalancerIPs: "10.0.0.235" }
+spec:
+  type: LoadBalancer
+  selector: { app: media-stack }
+  ports: [{ name: http, port: 80, targetPort: 6767 }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: seerr
+  namespace: media
+  annotations: { metallb.io/loadBalancerIPs: "10.0.0.236" }
+spec:
+  type: LoadBalancer
+  selector: { app: media-stack }
+  ports: [{ name: http, port: 80, targetPort: 5055 }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: maintainerr
+  namespace: media
+  annotations: { metallb.io/loadBalancerIPs: "10.0.0.237" }
+spec:
+  type: LoadBalancer
+  selector: { app: media-stack }
+  ports: [{ name: http, port: 80, targetPort: 6246 }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: flaresolverr
+  namespace: media
+spec:
+  selector: { app: media-stack }
+  ports: [{ name: http, port: 8191, targetPort: 8191 }]
+

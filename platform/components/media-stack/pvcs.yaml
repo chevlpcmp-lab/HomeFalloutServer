@@ -1,0 +1,63 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: config-radarr, namespace: media }
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path-retain
+  resources: { requests: { storage: 2Gi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: config-sonarr, namespace: media }
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path-retain
+  resources: { requests: { storage: 2Gi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: config-prowlarr, namespace: media }
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path-retain
+  resources: { requests: { storage: 2Gi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: config-qbittorrent, namespace: media }
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path-retain
+  resources: { requests: { storage: 2Gi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: config-bazarr, namespace: media }
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path-retain
+  resources: { requests: { storage: 2Gi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: config-seerr, namespace: media }
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path-retain
+  resources: { requests: { storage: 2Gi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: config-maintainerr, namespace: media }
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path-retain
+  resources: { requests: { storage: 2Gi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: config-homarr, namespace: media }
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path-retain
+  resources: { requests: { storage: 5Gi } }

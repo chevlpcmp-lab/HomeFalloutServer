@@ -1,0 +1,29 @@
+proxmox_endpoint  = "https://10.0.0.254:8006"
+proxmox_api_token = "terraform@pve!homefallout=REPLACE_ME"
+cloud_image_node  = "home"
+
+ssh_public_keys = [
+  "REPLACE_WITH_CONTENTS_OF_C:\\Users\\Charles\\.ssh\\homefallout_ed25519.pub",
+]
+
+k3s_token = "REPLACE_ME"
+
+# One converged VM fits the actual 16 GB host. A three-VM layout would exhaust RAM before
+# any application starts. The 700 GB thin-provisioned data disk leaves local-lvm headroom;
+# verify `pvesm status` on Proxmox and reduce it if local-lvm has less than about 780 GB free.
+nodes = {
+  "k3s-home-01" = {
+    proxmox_node = "home"
+    vmid         = 230
+    ip           = "10.0.0.10"
+    role         = "server"
+    pool         = "converged"
+    cores        = 12
+    memory_mb    = 10240
+    disk_gb      = 64
+    data_disk_gb = 700
+    data_disk_serial = "HOMEFALLOUT_DATA"
+    description  = "Single-node k3s: media, Jellyfin, Immich, and GitOps"
+    labels       = { "node-role.kubernetes.io/worker" = "true" }
+  }
+}
