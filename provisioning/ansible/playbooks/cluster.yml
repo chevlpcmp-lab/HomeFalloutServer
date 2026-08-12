@@ -13,6 +13,17 @@
         update_cache: true
         lock_timeout: 300
 
+    - name: Check for the Proxmox QEMU guest-agent channel
+      ansible.builtin.stat:
+        path: /dev/virtio-ports/org.qemu.guest_agent.0
+      register: qemu_guest_agent_channel
+
+    - name: Start the QEMU guest agent when its Proxmox channel is available
+      ansible.builtin.systemd_service:
+        name: qemu-guest-agent
+        state: started
+      when: qemu_guest_agent_channel.stat.exists
+
     - name: Inspect whole block devices
       ansible.builtin.command: lsblk --json --nodeps --output PATH,SERIAL,SIZE,TYPE
       register: block_devices

@@ -36,7 +36,7 @@ your root account.
 
 ```bash
 pveum user add terraform@pve
-pveum role add TerraformHome -privs "VM.PowerMgmt VM.Audit VM.Allocate VM.Clone VM.Config.CDROM VM.Config.CPU VM.Config.Cloudinit VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options Datastore.Audit Datastore.Allocate Datastore.AllocateSpace Datastore.AllocateTemplate Sys.Audit Sys.Modify SDN.Use"
+pveum role add TerraformHome -privs "VM.PowerMgmt VM.Audit VM.Allocate VM.Clone VM.Config.CDROM VM.Config.CPU VM.Config.Cloudinit VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.GuestAgent.Audit Datastore.Audit Datastore.Allocate Datastore.AllocateSpace Datastore.AllocateTemplate Sys.Audit Sys.Modify SDN.Use"
 pveum aclmod / -user terraform@pve -role TerraformHome
 pveum user token add terraform@pve homefallout --privsep=0
 ```
