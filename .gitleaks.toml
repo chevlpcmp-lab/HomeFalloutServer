@@ -1,0 +1,19 @@
+[extend]
+useDefault = true
+
+# kubeseal ciphertext begins with the encrypted-session-key envelope (`Ag...`)
+# and is much longer than the underlying WireGuard key or database password.
+# Require both the exact encrypted field shape and owning file path so plaintext
+# values in the same SealedSecret manifests remain detectable.
+[[allowlists]]
+description = "Cluster-sealed ciphertext fields"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = ['''^platform/components/(media-stack|immich)/resources/sealed-secret-.*\.yaml$''']
+regexes = ['''^\s+(WIREGUARD_PRIVATE_KEY|DB_PASSWORD):\s+Ag[A-Za-z0-9+/=_-]{100,}\s*$''']
+
+[[allowlists]]
+description = "Documented non-secret example placeholder"
+targetRules = ["generic-api-key"]
+regexes = ['''^REPLACE_WITH_64_HEX_CHARACTERS$''']

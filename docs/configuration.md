@@ -21,8 +21,9 @@ Set the same paths in qBittorrent and the Arr applications:
 
 qBittorrent's traffic uses Gluetun's default route and kill switch. Proton NAT-PMP port forwarding
 is enabled, and Gluetun automatically updates qBittorrent's listening port whenever Proton assigns
-or changes it. This relies on qBittorrent's **Bypass authentication for clients on localhost**
-option, which is enabled by default; leave that option on. Confirm the VPN before adding downloads:
+or changes it. A pod init container enforces qBittorrent's **Bypass authentication for clients on
+localhost** setting so only the local Gluetun API call bypasses login; LAN WebUI clients still
+authenticate. Confirm the VPN before adding downloads:
 
 ```powershell
 kubectl --kubeconfig provisioning/ansible/kubeconfig exec -n media deploy/media-stack -c gluetun -- wget -qO- https://ipinfo.io

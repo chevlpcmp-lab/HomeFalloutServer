@@ -80,6 +80,50 @@ spec:
             requests: { cpu: 50m, memory: 128Mi }
             limits: { cpu: 500m, memory: 512Mi }
 
+        # Gluetun updates qBittorrent's Proton-assigned port through the local API.
+        # Only localhost bypasses authentication; the LAN WebUI still requires it.
+        - name: configure-qbittorrent-local-api
+          image: busybox:1.37
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              conf=/config/qBittorrent/qBittorrent.conf
+              temp="${conf}.tmp"
+              mkdir -p "$(dirname "$conf")"
+              touch "$conf"
+              awk '
+                BEGIN { in_preferences=0; inserted=0; saw_preferences=0 }
+                $0 == "[Preferences]" {
+                  in_preferences=1; saw_preferences=1; print; next
+                }
+                /^\[/ {
+                  if (in_preferences && !inserted) {
+                    print "WebUI\\LocalHostAuth=false"; inserted=1
+                  }
+                  in_preferences=0
+                }
+                index($0, "WebUI\\LocalHostAuth=") == 1 {
+                  if (in_preferences && !inserted) {
+                    print "WebUI\\LocalHostAuth=false"; inserted=1
+                  }
+                  next
+                }
+                { print }
+                END {
+                  if (!saw_preferences) {
+                    print "[Preferences]"
+                    print "WebUI\\LocalHostAuth=false"
+                  } else if (in_preferences && !inserted) {
+                    print "WebUI\\LocalHostAuth=false"
+                  }
+                }
+              ' "$conf" > "$temp"
+              mv "$temp" "$conf"
+              chown -R 1000:1000 /config
+          volumeMounts:
+            - { name: config-qbittorrent, mountPath: /config }
+
       containers:
         - name: radarr
           image: lscr.io/linuxserver/radarr:6.3.0.10514-ls311
