@@ -287,6 +287,18 @@ data:
     # ── Bazarr (best-effort: its settings API is form-based and undocumented) ─
 
     def configure_bazarr(bazarr_key, radarr_key, sonarr_key):
+        print("Waiting for Bazarr...", flush=True)
+        for _ in range(120):
+            try:
+                req = urllib.request.Request(f"{BAZARR_URL}/api/system/status",
+                    headers={"X-API-KEY": bazarr_key})
+                with urllib.request.urlopen(req, timeout=5):
+                    break
+            except Exception:
+                time.sleep(5)
+        else:
+            raise RuntimeError("Bazarr not ready after 10 minutes")
+        print("Bazarr ready", flush=True)
         settings = {
             "settings-general-use_sonarr": "true",
             "settings-sonarr-ip":       "localhost",
