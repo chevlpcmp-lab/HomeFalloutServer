@@ -178,6 +178,7 @@ if (-not (Test-Path -LiteralPath $mediaSecretPath)) {
     $vpnCountry = Read-Host 'VPN server country [Canada]'
     if ([string]::IsNullOrWhiteSpace($vpnCountry)) { $vpnCountry = 'Canada' }
     $homarrKey = New-RandomHex 32
+    $qbPassword = New-RandomHex 16
     $mediaSecret = @"
 apiVersion: v1
 kind: Secret
@@ -191,6 +192,11 @@ stringData:
   WIREGUARD_PRIVATE_KEY: "$vpnPrivateKey"
   SERVER_COUNTRIES: "$vpnCountry"
 ---
+# HOMARR_API_KEY and JELLYFIN_API_KEY start empty: the media-stack bootstrap skips
+# Homarr provisioning until they are filled in. After the first deployment, create
+# the Homarr admin account and an API key (Management > Tools > API) plus a Jellyfin
+# API key (Dashboard > API Keys), paste them here, re-run seal-secrets.ps1, and
+# restart the media-stack deployment. See docs/configuration.md.
 apiVersion: v1
 kind: Secret
 metadata:
@@ -199,6 +205,20 @@ metadata:
 type: Opaque
 stringData:
   SECRET_ENCRYPTION_KEY: "$homarrKey"
+  HOMARR_API_KEY: ""
+  JELLYFIN_API_KEY: ""
+---
+# The bootstrap sidecar pushes these credentials into qBittorrent's WebUI so LAN
+# logins use a known password instead of the random one qBittorrent generates.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: qbittorrent-auth
+  namespace: media
+type: Opaque
+stringData:
+  WEBUI_USERNAME: "admin"
+  WEBUI_PASSWORD: "$qbPassword"
 "@
     Set-Content -LiteralPath $mediaSecretPath -Value $mediaSecret -Encoding UTF8
     Write-Host "Created $mediaSecretPath (gitignored)."

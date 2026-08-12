@@ -25,6 +25,7 @@ $secretSources = @(
 )
 $secretDestinations = @{
     'gluetun-vpn' = Join-Path $repoRoot 'platform\components\media-stack\resources'
+    'qbittorrent-auth' = Join-Path $repoRoot 'platform\components\media-stack\resources'
     'homarr-secrets' = Join-Path $repoRoot 'platform\components\homarr\resources'
     'immich-database' = Join-Path $repoRoot 'platform\components\immich\resources'
 }

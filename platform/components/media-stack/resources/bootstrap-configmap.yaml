@@ -1,0 +1,490 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: media-stack-bootstrap
+  namespace: media
+data:
+  bootstrap.py: |
+    #!/usr/bin/env python3
+    """
+    Wires up the media stack after the apps start, then provisions Homarr.
+
+    Runs as a sidecar in the media-stack pod, so every VPN-bound app is reachable on
+    localhost and qBittorrent's localhost authentication bypass applies. Homarr and
+    Jellyfin run in other pods and are addressed by Service DNS.
+
+    Each app's API key is read straight from its config volume, so nothing has to be
+    copied into Secrets by hand. Idempotent - skips anything already configured.
+
+    Homarr provisioning only runs when HOMARR_API_KEY is set (create the admin account,
+    then an API key under Management > Tools > API, and reseal homarr-secrets).
+    """
+    import http.cookiejar, json, os, re, time, urllib.parse, urllib.request, urllib.error, xml.etree.ElementTree as ET
+
+    RADARR_URL   = "http://localhost:7878"
+    SONARR_URL   = "http://localhost:8989"
+    PROWLARR_URL = "http://localhost:9696"
+    QB_URL       = "http://localhost:8080"
+    BAZARR_URL   = "http://localhost:6767"
+    FLARE_URL    = "http://localhost:8191"
+
+    HOMARR_URL       = os.environ.get("HOMARR_URL", "http://homarr.media.svc.cluster.local")
+    HOMARR_API_KEY   = os.environ.get("HOMARR_API_KEY", "")
+    JELLYFIN_API_KEY = os.environ.get("JELLYFIN_API_KEY", "")
+    QB_USER          = os.environ.get("QB_USER", "")
+    QB_PASS          = os.environ.get("QB_PASS", "")
+
+    # LAN addresses the dashboard links to (metallb LoadBalancer IPs).
+    LAN = {
+        "jellyfin":    "http://10.0.0.230:8096",
+        "radarr":      "http://10.0.0.231",
+        "sonarr":      "http://10.0.0.232",
+        "prowlarr":    "http://10.0.0.233",
+        "qbittorrent": "http://10.0.0.234",
+        "bazarr":      "http://10.0.0.235",
+        "seerr":       "http://10.0.0.236",
+        "maintainerr": "http://10.0.0.237",
+        "immich":      "http://10.0.0.240",
+    }
+    # Cluster-internal URLs Homarr's server uses for its integrations.
+    SVC = {
+        "jellyfin":    "http://jellyfin.media.svc.cluster.local:8096",
+        "radarr":      "http://radarr.media.svc.cluster.local",
+        "sonarr":      "http://sonarr.media.svc.cluster.local",
+        "prowlarr":    "http://prowlarr.media.svc.cluster.local",
+        "qbittorrent": "http://qbittorrent.media.svc.cluster.local",
+        "bazarr":      "http://bazarr.media.svc.cluster.local",
+        "seerr":       "http://seerr.media.svc.cluster.local",
+    }
+    ICONS = "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons@master"
+
+    # ── generic helpers ───────────────────────────────────────────────────────
+
+    def read_arr_key(path, max_wait=600):
+        deadline = time.time() + max_wait
+        while time.time() < deadline:
+            try:
+                key = ET.parse(path).getroot().findtext("ApiKey")
+                if key:
+                    return key
+            except Exception:
+                pass
+            time.sleep(5)
+        raise RuntimeError(f"API key not found in {path} after {max_wait}s")
+
+    def read_bazarr_key(path, max_wait=600):
+        # Stdlib-only parse of Bazarr's config.yaml: apikey under the auth: section.
+        deadline = time.time() + max_wait
+        while time.time() < deadline:
+            try:
+                section = None
+                with open(path) as f:
+                    for line in f:
+                        top = re.match(r"^(\w[\w-]*):", line)
+                        if top:
+                            section = top.group(1)
+                        m = re.match(r"^\s+apikey:\s*['\"]?([0-9a-fA-F]+)['\"]?\s*$", line)
+                        if m and section == "auth":
+                            return m.group(1)
+            except Exception:
+                pass
+            time.sleep(5)
+        raise RuntimeError(f"Bazarr API key not found in {path} after {max_wait}s")
+
+    def read_seerr_key(path, max_wait=600):
+        deadline = time.time() + max_wait
+        while time.time() < deadline:
+            try:
+                with open(path) as f:
+                    key = json.load(f).get("main", {}).get("apiKey")
+                if key:
+                    return key
+            except Exception:
+                pass
+            time.sleep(5)
+        raise RuntimeError(f"Seerr API key not found in {path} after {max_wait}s")
+
+    def get(url, api_key):
+        req = urllib.request.Request(url, headers={"X-Api-Key": api_key})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read())
+
+    def post(url, api_key, payload):
+        data = json.dumps(payload).encode()
+        req = urllib.request.Request(url, data=data, method="POST",
+            headers={"X-Api-Key": api_key, "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=90) as r:
+                content = r.read()
+                return json.loads(content) if content else {}
+        except urllib.error.HTTPError as e:
+            body = e.read().decode(errors="replace")
+            print(f"POST {url} -> HTTP {e.code}: {body[:500]}", flush=True)
+            raise
+
+    def delete(url, api_key):
+        req = urllib.request.Request(url, method="DELETE", headers={"X-Api-Key": api_key})
+        with urllib.request.urlopen(req, timeout=10):
+            pass
+
+    def wait_ready(base_url, api_key, name, ver="v3"):
+        print(f"Waiting for {name}...", flush=True)
+        for _ in range(120):
+            try:
+                get(f"{base_url}/api/{ver}/system/status", api_key)
+                print(f"{name} ready", flush=True)
+                return
+            except Exception:
+                pass
+            time.sleep(5)
+        raise RuntimeError(f"{name} not ready after 10 minutes")
+
+    # ── qBittorrent (localhost auth bypass, no credentials needed) ────────────
+
+    def configure_qbittorrent():
+        print("Waiting for qBittorrent...", flush=True)
+        for _ in range(120):
+            try:
+                urllib.request.urlopen(f"{QB_URL}/", timeout=5)
+                break
+            except Exception:
+                time.sleep(5)
+        else:
+            raise RuntimeError("qBittorrent not ready after 10 minutes")
+        print("qBittorrent ready", flush=True)
+
+        def set_prefs(prefs):
+            data = urllib.parse.urlencode({"json": json.dumps(prefs)}).encode()
+            urllib.request.urlopen(f"{QB_URL}/api/v2/app/setPreferences", data, timeout=10)
+
+        # Incomplete and complete share the dataset so the completion move is a
+        # rename, not a copy. Listen port and interface are owned by Gluetun.
+        for d in ["/data/downloads/incomplete", "/data/downloads/complete",
+                  "/data/library/movies", "/data/library/tv"]:
+            os.makedirs(d, exist_ok=True)
+        set_prefs({
+            "save_path": "/data/downloads/complete",
+            "temp_path_enabled": True,
+            "temp_path": "/data/downloads/incomplete",
+        })
+        print("qBittorrent: save=/data/downloads/complete temp=/data/downloads/incomplete", flush=True)
+
+        # Sync the WebUI credentials from the secret so LAN browser logins are
+        # deterministic instead of the random password qBittorrent generates.
+        # Localhost callers bypass auth either way.
+        if QB_USER and QB_PASS:
+            set_prefs({"web_ui_username": QB_USER, "web_ui_password": QB_PASS})
+            print("qBittorrent: WebUI credentials synced from secret", flush=True)
+        else:
+            print("qBittorrent: no qbittorrent-auth secret - WebUI password left as-is", flush=True)
+
+        # Keep the category labels (Radarr/Sonarr identify downloads by them) but
+        # point both at the flat complete dir - no per-category subfolders.
+        for cat in ["radarr", "sonarr"]:
+            form = urllib.parse.urlencode({"category": cat, "savePath": "/data/downloads/complete"}).encode()
+            try:
+                urllib.request.urlopen(f"{QB_URL}/api/v2/torrents/createCategory", form, timeout=10)
+                print(f"qBittorrent: category '{cat}' created", flush=True)
+            except urllib.error.HTTPError as e:
+                if e.code != 409:
+                    raise
+                urllib.request.urlopen(f"{QB_URL}/api/v2/torrents/editCategory", form, timeout=10)
+                print(f"qBittorrent: category '{cat}' updated", flush=True)
+
+    # ── Radarr / Sonarr / Prowlarr ────────────────────────────────────────────
+
+    def add_root_folder(base_url, api_key, app, path):
+        folders = get(f"{base_url}/api/v3/rootfolder", api_key)
+        if any(f.get("path") == path for f in folders):
+            print(f"{app}: root folder {path} already configured", flush=True)
+            return
+        try:
+            post(f"{base_url}/api/v3/rootfolder", api_key, {"path": path})
+            print(f"{app}: root folder {path} added", flush=True)
+        except urllib.error.HTTPError as e:
+            print(f"WARNING: {app}: root folder {path} failed (HTTP {e.code}) - check permissions", flush=True)
+
+    def add_qbittorrent_client(base_url, api_key, app):
+        clients = get(f"{base_url}/api/v3/downloadclient", api_key)
+        existing = next((c for c in clients if c.get("name") == "qBittorrent"), None)
+        is_radarr = "7878" in base_url
+        cat_field   = "movieCategory"       if is_radarr else "tvCategory"
+        prio_field  = "recentMoviePriority" if is_radarr else "recentTvPriority"
+        prio_field2 = "olderMoviePriority"  if is_radarr else "olderTvPriority"
+        payload = {
+            "name": "qBittorrent",
+            "enable": True,
+            "protocol": "torrent",
+            "priority": 1,
+            "removeCompletedDownloads": True,
+            "removeFailedDownloads": True,
+            "fields": [
+                # Same pod: localhost, so qBittorrent's localhost bypass applies and
+                # the credentials are irrelevant. Sent anyway when configured.
+                {"name": "host",            "value": "localhost"},
+                {"name": "port",            "value": 8080},
+                {"name": "useSsl",          "value": False},
+                {"name": "urlBase",         "value": ""},
+                {"name": "username",        "value": QB_USER},
+                {"name": "password",        "value": QB_PASS},
+                {"name": cat_field,         "value": "radarr" if is_radarr else "sonarr"},
+                {"name": prio_field,        "value": 0},
+                {"name": prio_field2,       "value": 0},
+                {"name": "initialState",    "value": 0},
+                {"name": "sequentialOrder", "value": False},
+                {"name": "firstAndLast",    "value": False},
+            ],
+            "implementationName": "qBittorrent",
+            "implementation":     "QBittorrent",
+            "configContract":     "QBittorrentSettings",
+            "tags": [],
+        }
+        if existing:
+            delete(f"{base_url}/api/v3/downloadclient/{existing['id']}", api_key)
+        post(f"{base_url}/api/v3/downloadclient", api_key, payload)
+        print(f"{app}: qBittorrent download client {'updated' if existing else 'added'}", flush=True)
+
+    def add_flaresolverr(prowlarr_key):
+        proxies = get(f"{PROWLARR_URL}/api/v1/indexerproxy", prowlarr_key)
+        if any(p.get("name") == "FlareSolverr" for p in proxies):
+            print("Prowlarr: FlareSolverr already configured", flush=True)
+            return
+        post(f"{PROWLARR_URL}/api/v1/indexerproxy", prowlarr_key, {
+            "name": "FlareSolverr",
+            "implementation": "FlareSolverr",
+            "configContract": "FlareSolverrSettings",
+            "fields": [
+                {"name": "host",           "value": FLARE_URL},
+                {"name": "requestTimeout", "value": 60},
+            ],
+            "tags": [],
+        })
+        print("Prowlarr: FlareSolverr proxy added", flush=True)
+
+    def add_prowlarr_app(prowlarr_key, app_name, app_url, app_key):
+        apps = get(f"{PROWLARR_URL}/api/v1/applications", prowlarr_key)
+        if any(a.get("name") == app_name for a in apps):
+            print(f"Prowlarr: {app_name} already configured", flush=True)
+            return
+        is_radarr = app_name == "Radarr"
+        cats = ([2000, 2010, 2020, 2030, 2040, 2045, 2050, 2060]
+                if is_radarr else
+                [5000, 5010, 5020, 5030, 5040, 5045, 5050, 5060, 5070])
+        post(f"{PROWLARR_URL}/api/v1/applications", prowlarr_key, {
+            "name":           app_name,
+            "implementation": app_name,
+            "configContract": f"{app_name}Settings",
+            "fields": [
+                {"name": "prowlarrUrl",    "value": PROWLARR_URL},
+                {"name": "baseUrl",        "value": app_url},
+                {"name": "apiKey",         "value": app_key},
+                {"name": "syncCategories", "value": cats},
+            ],
+            "tags": [],
+        })
+        print(f"Prowlarr: {app_name} app added", flush=True)
+
+    # ── Bazarr (best-effort: its settings API is form-based and undocumented) ─
+
+    def configure_bazarr(bazarr_key, radarr_key, sonarr_key):
+        settings = {
+            "settings-general-use_sonarr": "true",
+            "settings-sonarr-ip":       "localhost",
+            "settings-sonarr-port":     "8989",
+            "settings-sonarr-base_url": "/",
+            "settings-sonarr-ssl":      "false",
+            "settings-sonarr-apikey":   sonarr_key,
+            "settings-general-use_radarr": "true",
+            "settings-radarr-ip":       "localhost",
+            "settings-radarr-port":     "7878",
+            "settings-radarr-base_url": "/",
+            "settings-radarr-ssl":      "false",
+            "settings-radarr-apikey":   radarr_key,
+        }
+        data = urllib.parse.urlencode(settings).encode()
+        req = urllib.request.Request(f"{BAZARR_URL}/api/system/settings", data=data, method="POST",
+            headers={"X-API-KEY": bazarr_key, "Content-Type": "application/x-www-form-urlencoded"})
+        with urllib.request.urlopen(req, timeout=30):
+            pass
+        print("Bazarr: Radarr and Sonarr connections configured", flush=True)
+
+    # ── Homarr ────────────────────────────────────────────────────────────────
+    # REST (OpenAPI) endpoints are used where they exist; integrations are only
+    # exposed over tRPC, which accepts the same ApiKey header. tRPC uses
+    # superjson, so inputs are wrapped in {"json": ...}.
+
+    def homarr_rest(method, path, payload=None):
+        data = json.dumps(payload).encode() if payload is not None else None
+        req = urllib.request.Request(f"{HOMARR_URL}{path}", data=data, method=method,
+            headers={"ApiKey": HOMARR_API_KEY, "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=90) as r:
+            content = r.read()
+            return json.loads(content) if content else None
+
+    def homarr_trpc_query(proc):
+        req = urllib.request.Request(f"{HOMARR_URL}/api/trpc/{proc}",
+            headers={"ApiKey": HOMARR_API_KEY})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.loads(r.read())["result"]["data"]["json"]
+
+    def homarr_trpc_mutation(proc, payload):
+        data = json.dumps({"json": payload}).encode()
+        req = urllib.request.Request(f"{HOMARR_URL}/api/trpc/{proc}", data=data, method="POST",
+            headers={"ApiKey": HOMARR_API_KEY, "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=90) as r:
+            body = json.loads(r.read())
+            return body.get("result", {}).get("data", {}).get("json")
+
+    def provision_homarr(keys):
+        print("Waiting for Homarr...", flush=True)
+        for _ in range(120):
+            try:
+                homarr_rest("GET", "/api/apps")
+                break
+            except Exception:
+                time.sleep(5)
+        else:
+            raise RuntimeError("Homarr not ready after 10 minutes")
+        print("Homarr ready", flush=True)
+
+        # name -> (icon, lan url, description)
+        tiles = {
+            "Jellyfin":    (f"{ICONS}/svg/jellyfin.svg",    LAN["jellyfin"],    "Movies and TV"),
+            "Seerr":       (f"{ICONS}/svg/seerr.svg",       LAN["seerr"],       "Request movies and TV"),
+            "Radarr":      (f"{ICONS}/svg/radarr.svg",      LAN["radarr"],      "Movie management"),
+            "Sonarr":      (f"{ICONS}/svg/sonarr.svg",      LAN["sonarr"],      "TV management"),
+            "Prowlarr":    (f"{ICONS}/svg/prowlarr.svg",    LAN["prowlarr"],    "Indexer management"),
+            "qBittorrent": (f"{ICONS}/svg/qbittorrent.svg", LAN["qbittorrent"], "Torrent client"),
+            "Bazarr":      (f"{ICONS}/svg/bazarr.svg",      LAN["bazarr"],      "Subtitles"),
+            "Maintainerr": (f"{ICONS}/png/maintainerr.png", LAN["maintainerr"], "Library cleanup"),
+            "Immich":      (f"{ICONS}/svg/immich.svg",      LAN["immich"],      "Photos"),
+        }
+        existing_apps = {a["name"] for a in homarr_rest("GET", "/api/apps")}
+        for name, (icon, href, desc) in tiles.items():
+            if name in existing_apps:
+                print(f"Homarr: app '{name}' already exists", flush=True)
+                continue
+            homarr_rest("POST", "/api/apps", {
+                "name": name, "iconUrl": icon, "href": href,
+                "pingUrl": href, "description": desc,
+            })
+            print(f"Homarr: app '{name}' created", flush=True)
+        app_ids = {a["name"]: a["id"] for a in homarr_rest("GET", "/api/apps")}
+
+        # kind -> (display name, service url, secrets)
+        wanted = {
+            "radarr":   ("Radarr",   SVC["radarr"],   [{"kind": "apiKey", "value": keys["radarr"]}]),
+            "sonarr":   ("Sonarr",   SVC["sonarr"],   [{"kind": "apiKey", "value": keys["sonarr"]}]),
+            "prowlarr": ("Prowlarr", SVC["prowlarr"], [{"kind": "apiKey", "value": keys["prowlarr"]}]),
+            "bazarr":   ("Bazarr",   SVC["bazarr"],   [{"kind": "apiKey", "value": keys["bazarr"]}]),
+            "seerr":    ("Seerr",    SVC["seerr"],    [{"kind": "apiKey", "value": keys["seerr"]}]),
+        }
+        if QB_USER and QB_PASS:
+            wanted["qBittorrent"] = ("qBittorrent", SVC["qbittorrent"],
+                [{"kind": "username", "value": QB_USER}, {"kind": "password", "value": QB_PASS}])
+        else:
+            print("Homarr: skipping qBittorrent integration (no qbittorrent-auth secret)", flush=True)
+        if JELLYFIN_API_KEY:
+            wanted["jellyfin"] = ("Jellyfin", SVC["jellyfin"],
+                [{"kind": "apiKey", "value": JELLYFIN_API_KEY}])
+        else:
+            print("Homarr: skipping Jellyfin integration (JELLYFIN_API_KEY not set)", flush=True)
+
+        existing = {i["kind"]: i["id"] for i in homarr_trpc_query("integration.all")}
+        for kind, (name, url, secrets) in wanted.items():
+            if kind in existing:
+                print(f"Homarr: integration '{name}' already exists", flush=True)
+                continue
+            payload = {
+                "name": name, "url": url, "kind": kind, "secrets": secrets,
+                "attemptSearchEngineCreation": False,
+            }
+            if name in app_ids:
+                payload["app"] = {"id": app_ids[name]}
+            try:
+                result = homarr_trpc_mutation("integration.create", payload)
+                if result and result.get("error"):
+                    print(f"Homarr: integration '{name}' connection test failed: {result['error']}", flush=True)
+                else:
+                    print(f"Homarr: integration '{name}' created", flush=True)
+            except Exception as e:
+                print(f"Homarr: integration '{name}' failed ({e}) - configure manually if needed", flush=True)
+        integrations = {i["kind"]: i["id"] for i in homarr_trpc_query("integration.all")}
+
+        boards = homarr_rest("GET", "/api/boards")
+        board = next((b for b in boards if b["name"] == "media"), None)
+        if board:
+            print("Homarr: board 'media' already exists - leaving layout alone", flush=True)
+            return
+        board_id = homarr_rest("POST", "/api/boards",
+            {"name": "media", "columnCount": 10, "isPublic": False})["boardId"]
+        print("Homarr: board 'media' created", flush=True)
+
+        def add_item(kind, options=None, integration_kinds=()):
+            ids = [integrations[k] for k in integration_kinds if k in integrations]
+            if integration_kinds and not ids:
+                return
+            homarr_rest("POST", "/api/boards/items", {
+                "boardId": board_id, "kind": kind,
+                "options": options or {}, "integrationIds": ids,
+            })
+            print(f"Homarr: added '{kind}' to board", flush=True)
+
+        for name in tiles:
+            if name in app_ids:
+                add_item("app", {"appId": app_ids[name]})
+        add_item("calendar",                  integration_kinds=("radarr", "sonarr"))
+        add_item("downloads",                 integration_kinds=("qBittorrent",))
+        add_item("mediaServer",               integration_kinds=("jellyfin",))
+        add_item("mediaRequests-requestList", integration_kinds=("seerr",))
+        add_item("mediaRequests-requestStats", integration_kinds=("seerr",))
+        add_item("indexerManager",            integration_kinds=("prowlarr",))
+        homarr_rest("PATCH", f"/api/boards/{board_id}/home", {})
+        print("Homarr: board 'media' set as home board", flush=True)
+
+    # ── main ──────────────────────────────────────────────────────────────────
+
+    print("Bootstrap starting...", flush=True)
+
+    print("Reading API keys from config volumes...", flush=True)
+    keys = {
+        "radarr":   read_arr_key("/config/radarr/config.xml"),
+        "sonarr":   read_arr_key("/config/sonarr/config.xml"),
+        "prowlarr": read_arr_key("/config/prowlarr/config.xml"),
+        "bazarr":   read_bazarr_key("/config/bazarr/config/config.yaml"),
+        "seerr":    read_seerr_key("/config/seerr/settings.json"),
+    }
+
+    wait_ready(RADARR_URL,   keys["radarr"],   "Radarr")
+    wait_ready(SONARR_URL,   keys["sonarr"],   "Sonarr")
+    wait_ready(PROWLARR_URL, keys["prowlarr"], "Prowlarr", "v1")
+
+    configure_qbittorrent()
+    add_root_folder(RADARR_URL, keys["radarr"], "Radarr", "/data/library/movies")
+    add_root_folder(SONARR_URL, keys["sonarr"], "Sonarr", "/data/library/tv")
+    add_qbittorrent_client(RADARR_URL, keys["radarr"], "Radarr")
+    add_qbittorrent_client(SONARR_URL, keys["sonarr"], "Sonarr")
+    add_flaresolverr(keys["prowlarr"])
+    add_prowlarr_app(keys["prowlarr"], "Radarr", RADARR_URL, keys["radarr"])
+    add_prowlarr_app(keys["prowlarr"], "Sonarr", SONARR_URL, keys["sonarr"])
+
+    try:
+        configure_bazarr(keys["bazarr"], keys["radarr"], keys["sonarr"])
+    except Exception as e:
+        print(f"Bazarr: wiring failed ({type(e).__name__}: {e}) - configure manually if needed", flush=True)
+
+    if HOMARR_API_KEY:
+        # A failure here must not crash-loop the pod and re-run the arr wiring
+        # forever; log it and retry on the next pod restart instead.
+        try:
+            provision_homarr(keys)
+        except Exception as e:
+            print(f"Homarr: provisioning failed ({type(e).__name__}: {e})", flush=True)
+    else:
+        print("Homarr: HOMARR_API_KEY not set - skipping dashboard provisioning.", flush=True)
+        print("Homarr: create the admin account, then an API key under Management > Tools > API,", flush=True)
+        print("Homarr: add it to platform/secrets/media-secrets.yaml, reseal, and restart this pod.", flush=True)
+
+    print("Bootstrap complete!", flush=True)
+    while True:
+        time.sleep(86400)

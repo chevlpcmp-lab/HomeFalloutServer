@@ -210,6 +210,43 @@ spec:
             - { name: config-seerr, mountPath: /app/config }
           resources: *arr-resources
 
+        # Reconciles the wiring BETWEEN the apps (download clients, Prowlarr sync,
+        # FlareSolverr, Bazarr connections, root folders) and provisions Homarr's
+        # apps, integrations, and board. It shares this pod's network namespace, so
+        # every app is on localhost and qBittorrent's localhost auth bypass applies.
+        # Idempotent: re-asserts the wiring on every pod restart.
+        - name: bootstrap
+          image: python:3.13-slim
+          command: [python3, /scripts/bootstrap.py]
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+          env:
+            - { name: TZ, value: America/Toronto }
+            - name: QB_USER
+              valueFrom:
+                secretKeyRef: { name: qbittorrent-auth, key: WEBUI_USERNAME, optional: true }
+            - name: QB_PASS
+              valueFrom:
+                secretKeyRef: { name: qbittorrent-auth, key: WEBUI_PASSWORD, optional: true }
+            - name: HOMARR_API_KEY
+              valueFrom:
+                secretKeyRef: { name: homarr-secrets, key: HOMARR_API_KEY, optional: true }
+            - name: JELLYFIN_API_KEY
+              valueFrom:
+                secretKeyRef: { name: homarr-secrets, key: JELLYFIN_API_KEY, optional: true }
+          volumeMounts:
+            - { name: bootstrap-script, mountPath: /scripts, readOnly: true }
+            - { name: config-radarr, mountPath: /config/radarr, readOnly: true }
+            - { name: config-sonarr, mountPath: /config/sonarr, readOnly: true }
+            - { name: config-prowlarr, mountPath: /config/prowlarr, readOnly: true }
+            - { name: config-bazarr, mountPath: /config/bazarr, readOnly: true }
+            - { name: config-seerr, mountPath: /config/seerr, readOnly: true }
+            - { name: media-data, mountPath: /data }
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 128Mi }
+
         - name: maintainerr
           image: ghcr.io/maintainerr/maintainerr:latest
           env:
@@ -222,6 +259,7 @@ spec:
           resources: *arr-resources
 
       volumes:
+        - { name: bootstrap-script, configMap: { name: media-stack-bootstrap } }
         - { name: media-data, persistentVolumeClaim: { claimName: media-data } }
         - { name: config-radarr, persistentVolumeClaim: { claimName: config-radarr } }
         - { name: config-sonarr, persistentVolumeClaim: { claimName: config-sonarr } }

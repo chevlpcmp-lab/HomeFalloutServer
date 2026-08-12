@@ -1,7 +1,9 @@
 # First-run application wiring
 
-The VPN-bound media applications share one pod, so use `localhost` for their internal links.
-Homarr, Jellyfin, and Immich are separate components and pods:
+A `bootstrap` sidecar in the media-stack pod (`bootstrap-configmap.yaml`) wires the
+applications together automatically. It reads each app's API key straight from its config
+volume, waits for the APIs to come up, and idempotently re-asserts the configuration on
+every pod restart. It configures:
 
 | From | To | URL |
 | --- | --- | --- |
@@ -10,14 +12,51 @@ Homarr, Jellyfin, and Immich are separate components and pods:
 | Prowlarr | FlareSolverr | `http://localhost:8191` |
 | Bazarr | Radarr | `http://localhost:7878` |
 | Bazarr | Sonarr | `http://localhost:8989` |
-| Seerr / Maintainerr | Jellyfin | `http://jellyfin:8096` |
+| Homarr | everything | Service DNS, for example `http://radarr.media.svc.cluster.local` |
 
-Set the same paths in qBittorrent and the Arr applications:
+It also creates the shared paths and sets them in qBittorrent and the Arr applications:
 
 - qBittorrent incomplete: `/data/downloads/incomplete`
 - qBittorrent complete: `/data/downloads/complete`
 - Radarr root: `/data/library/movies`
 - Sonarr root: `/data/library/tv`
+
+qBittorrent's WebUI credentials are synced from the `qbittorrent-auth` secret, so the LAN
+login is the password in `platform/secrets/media-secrets.yaml` rather than the random one
+qBittorrent prints to its log. Check progress or failures with:
+
+```powershell
+kubectl --kubeconfig provisioning/ansible/kubeconfig logs -n media deploy/media-stack -c bootstrap
+```
+
+## Homarr dashboard provisioning
+
+The bootstrap also fills Homarr with app tiles (with LAN links and ping URLs),
+integrations for Radarr, Sonarr, Prowlarr, Bazarr, Seerr, qBittorrent, and Jellyfin, and a
+`media` board pre-populated with those tiles plus calendar, downloads, media-server, and
+request widgets. Two secrets gate it, and until they are filled the bootstrap simply skips
+the corresponding pieces:
+
+1. Open Homarr at `http://10.0.0.220`, create the admin account, then create an API key
+   under **Management > Tools > API** (format `id.token`). Put it in `HOMARR_API_KEY` in
+   `platform/secrets/media-secrets.yaml`.
+2. In Jellyfin (`http://10.0.0.230:8096`), create an API key under
+   **Dashboard > API Keys** and put it in `JELLYFIN_API_KEY` in the same file. Without it
+   the Jellyfin integration and media-server widget are skipped; everything else still
+   provisions.
+3. Reseal and roll the pod so the sidecar picks the keys up:
+
+```powershell
+.\scripts\seal-secrets.ps1
+git add platform/components/*/resources/sealed-secret-*.yaml; git commit -m "Add Homarr bootstrap keys"; git push
+kubectl --kubeconfig provisioning/ansible/kubeconfig rollout restart -n media deploy/media-stack
+```
+
+The board is only laid out when the bootstrap creates it: rearranging tiles afterwards is
+safe, and deleting the `media` board makes the next restart rebuild it. Seerr and
+Maintainerr still need their own first-run wizards (they authenticate against Jellyfin
+interactively); the bootstrap only reads Seerr's generated API key for the Homarr
+integration.
 
 qBittorrent's traffic uses Gluetun's default route and kill switch. Proton NAT-PMP port forwarding
 is enabled, and Gluetun automatically updates qBittorrent's listening port whenever Proton assigns
