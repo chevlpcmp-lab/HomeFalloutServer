@@ -19,7 +19,7 @@ Commit only these generated encrypted files:
 
 ```text
 platform/components/media-stack/resources/sealed-secret-gluetun-vpn.yaml
-platform/components/media-stack/resources/sealed-secret-homarr-secrets.yaml
+platform/components/homarr/resources/sealed-secret-homarr-secrets.yaml
 platform/components/immich/resources/sealed-secret-immich-database.yaml
 ```
 

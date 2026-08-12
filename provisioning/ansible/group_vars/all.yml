@@ -8,4 +8,9 @@ k3s_disable:
 # by serial, never by a changeable /dev/sdX path.
 initialize_data_disk: true
 data_mount_path: /mnt/data
-k3s_local_storage_path: /mnt/data/k3s-storage
+
+# A separate Terraform disk backed by Proxmox `local` holds every dynamically
+# provisioned application configuration/database PVC.
+initialize_config_disk: true
+config_mount_path: /mnt/config
+k3s_local_storage_path: /mnt/config/k3s-storage

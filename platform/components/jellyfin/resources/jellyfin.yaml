@@ -5,8 +5,8 @@ metadata:
   namespace: media
 spec:
   accessModes: [ReadWriteOnce]
-  storageClassName: local-path-retain
-  resources: { requests: { storage: 20Gi } }
+  storageClassName: config-local-retain
+  resources: { requests: { storage: 2Gi } }
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -15,8 +15,8 @@ metadata:
   namespace: media
 spec:
   accessModes: [ReadWriteOnce]
-  storageClassName: local-path-retain
-  resources: { requests: { storage: 50Gi } }
+  storageClassName: config-local-retain
+  resources: { requests: { storage: 3Gi } }
 ---
 apiVersion: apps/v1
 kind: Deployment

@@ -68,7 +68,7 @@ components:
     resources:
       enabled: true
 
-  - name: jellyfin
+  - name: homarr
     tier: apps
     waveOffset: 2
     namespace: media
@@ -76,9 +76,17 @@ components:
     resources:
       enabled: true
 
-  - name: immich
+  - name: jellyfin
     tier: apps
     waveOffset: 4
+    namespace: media
+    project: applications
+    resources:
+      enabled: true
+
+  - name: immich
+    tier: apps
+    waveOffset: 6
     namespace: photos
     project: applications
     resources:

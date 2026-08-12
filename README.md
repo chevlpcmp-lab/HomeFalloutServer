@@ -20,8 +20,9 @@ manifest by hand.
 ## Hardware-specific design
 
 This host has an i7-14700, 16 GB RAM, and one 1 TB NVMe. The configuration creates one 10 GB k3s
-VM instead of three pretend-HA VMs. It attaches a 64 GB OS disk and a 600 GB data disk. See
-[storage](docs/storage.md) for realistic capacity and upgrade advice.
+VM instead of three pretend-HA VMs. Proxmox `local` holds a 32 GB OS disk and a 32 GB persistent
+configuration disk; `local-lvm` is reserved for the 600 GB Immich/media disk and future bulk-data
+growth. See [storage](docs/storage.md) for realistic capacity and upgrade advice.
 
 ## Service addresses
 
@@ -44,7 +45,7 @@ MetalLB.
 ## Before the first apply
 
 1. Complete [the Proxmox prerequisites](docs/proxmox-prerequisites.md), including checking the real
-   `local-lvm` capacity and creating the API token.
+   `local`/`local-lvm` capacity, enabling disk images on `local`, and creating the API token.
 2. Install Ubuntu 24.04 WSL once; Ansible runs there while Terraform and kubectl run on Windows.
 
 ## Deploy from this laptop
@@ -108,7 +109,7 @@ Then apply the root app, wait for the Sealed Secrets controller, and create the 
 kubectl --kubeconfig provisioning/ansible/kubeconfig rollout status deployment/sealed-secrets-controller -n secrets --timeout=5m
 .\scripts\seal-secrets.ps1
 kubectl --kubeconfig provisioning/ansible/kubeconfig apply -f platform/components/media-stack/resources/sealed-secret-gluetun-vpn.yaml
-kubectl --kubeconfig provisioning/ansible/kubeconfig apply -f platform/components/media-stack/resources/sealed-secret-homarr-secrets.yaml
+kubectl --kubeconfig provisioning/ansible/kubeconfig apply -f platform/components/homarr/resources/sealed-secret-homarr-secrets.yaml
 kubectl --kubeconfig provisioning/ansible/kubeconfig apply -f platform/components/immich/resources/sealed-secret-immich-database.yaml
 .\scripts\backup-sealing-key.ps1
 ```

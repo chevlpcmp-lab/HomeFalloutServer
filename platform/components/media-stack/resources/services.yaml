@@ -3,17 +3,6 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: homarr
-  namespace: media
-  annotations: { metallb.io/loadBalancerIPs: "10.0.0.220" }
-spec:
-  type: LoadBalancer
-  selector: { app: media-stack }
-  ports: [{ name: http, port: 80, targetPort: 7575 }]
----
-apiVersion: v1
-kind: Service
-metadata:
   name: radarr
   namespace: media
   annotations: { metallb.io/loadBalancerIPs: "10.0.0.231" }

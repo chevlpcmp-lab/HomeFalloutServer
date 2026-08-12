@@ -3,16 +3,16 @@ kind: PersistentVolumeClaim
 metadata: { name: immich-postgres, namespace: photos }
 spec:
   accessModes: [ReadWriteOnce]
-  storageClassName: local-path-retain
-  resources: { requests: { storage: 30Gi } }
+  storageClassName: config-local-retain
+  resources: { requests: { storage: 8Gi } }
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata: { name: immich-model-cache, namespace: photos }
 spec:
   accessModes: [ReadWriteOnce]
-  storageClassName: local-path-retain
-  resources: { requests: { storage: 10Gi } }
+  storageClassName: config-local-retain
+  resources: { requests: { storage: 2Gi } }
 ---
 apiVersion: apps/v1
 kind: StatefulSet

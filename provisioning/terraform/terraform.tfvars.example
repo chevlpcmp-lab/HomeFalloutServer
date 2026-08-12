@@ -19,9 +19,14 @@ nodes = {
     pool         = "converged"
     cores        = 12
     memory_mb    = 10240
-    disk_gb      = 64
+    disk_gb      = 32
+    datastore    = "local"
     data_disk_gb = 600
+    data_disk_datastore = "local-lvm"
     data_disk_serial = "HOMEFALLOUT_DATA"
+    config_disk_gb = 32
+    config_disk_datastore = "local"
+    config_disk_serial = "HOMEFALLOUT_CONFIG"
     description  = "Single-node k3s: media, Jellyfin, Immich, and GitOps"
     labels       = { "node-role.kubernetes.io/worker" = "true" }
   }

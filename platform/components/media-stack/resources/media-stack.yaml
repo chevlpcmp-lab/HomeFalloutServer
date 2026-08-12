@@ -63,7 +63,7 @@ spec:
                 "json={\"listen_port\":0,\"current_network_interface\":\"lo\"}"
                 http://127.0.0.1:8080/api/v2/app/setPreferences'
             - name: FIREWALL_INPUT_PORTS
-              value: "5055,6246,6767,7575,7878,8000,8080,8191,8989,9696"
+              value: "5055,6246,6767,7878,8000,8080,8191,8989,9696"
             # These private ranges bypass the VPN so LAN clients and Kubernetes probes
             # can reach the UIs. All public destinations still use the tunnel.
             - name: FIREWALL_OUTBOUND_SUBNETS
@@ -177,18 +177,6 @@ spec:
             - { name: config-maintainerr, mountPath: /opt/data }
           resources: *arr-resources
 
-        - name: homarr
-          image: ghcr.io/homarr-labs/homarr:latest
-          env:
-            - { name: TZ, value: America/Toronto }
-            - name: SECRET_ENCRYPTION_KEY
-              valueFrom: { secretKeyRef: { name: homarr-secrets, key: SECRET_ENCRYPTION_KEY } }
-          ports: [{ name: homarr, containerPort: 7575 }]
-          startupProbe: { tcpSocket: { port: 7575 }, periodSeconds: 5, failureThreshold: 30 }
-          volumeMounts:
-            - { name: config-homarr, mountPath: /appdata }
-          resources: *arr-resources
-
       volumes:
         - { name: media-data, persistentVolumeClaim: { claimName: media-data } }
         - { name: config-radarr, persistentVolumeClaim: { claimName: config-radarr } }
@@ -198,4 +186,3 @@ spec:
         - { name: config-bazarr, persistentVolumeClaim: { claimName: config-bazarr } }
         - { name: config-seerr, persistentVolumeClaim: { claimName: config-seerr } }
         - { name: config-maintainerr, persistentVolumeClaim: { claimName: config-maintainerr } }
-        - { name: config-homarr, persistentVolumeClaim: { claimName: config-homarr } }

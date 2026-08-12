@@ -35,13 +35,14 @@ redundancy while wasting memory on three operating systems. It is not highly ava
 NVMe, Proxmox host, VM, and k3s node are all failure domains.
 
 The VM gets 10 GB RAM and 12 of the i7-14700's 28 logical CPUs. Proxmox retains roughly 5 GB RAM.
-The VM uses a 64 GB OS disk plus a 600 GB data disk. Both are thin volumes on the same physical
-NVMe; the separation is operational, not redundant.
+The VM uses a 32 GB OS disk and 32 GB application-config disk on Proxmox `local`, plus a 600 GB
+bulk-data disk on `local-lvm`. All three still reside on the same physical NVMe; the separation is
+operational, not redundant.
 
 ## VPN boundary
 
 The `media-stack` Deployment creates one pod containing Gluetun, Radarr, Sonarr, Prowlarr,
-qBittorrent, FlareSolverr, Bazarr, Seerr, Maintainerr, and Homarr. Kubernetes containers in a pod
+qBittorrent, FlareSolverr, Bazarr, Seerr, and Maintainerr. Kubernetes containers in a pod
 share a network namespace, so Gluetun changes the routes and firewall for all of them.
 
 Gluetun is defined as a restartable init container (a native Kubernetes sidecar). Kubernetes waits
@@ -49,7 +50,8 @@ for its startup probe before launching the other containers. This prevents appli
 briefly using the normal pod route while the VPN is still connecting. The tradeoff is deliberate:
 one container/PVC change recreates the whole media pod.
 
-Jellyfin is a separate pod at `10.0.0.230:8096`; LAN streaming should not cross the VPN. Immich is
+Homarr is a separate component and pod at `10.0.0.220`; its dashboard traffic does not need the
+VPN. Jellyfin is separate at `10.0.0.230:8096`; LAN streaming should not cross the VPN. Immich is
 separate at `10.0.0.240`; its database and machine-learning lifecycle are independent.
 
 ## LAN allocation

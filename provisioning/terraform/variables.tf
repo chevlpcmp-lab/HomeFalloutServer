@@ -82,21 +82,30 @@ variable "k3s_token" {
 variable "nodes" {
   description = "k3s VMs keyed by their permanent hostname"
   type = map(object({
-    proxmox_node     = string
-    vmid             = number
-    ip               = string
-    role             = string
-    pool             = string
-    cores            = number
-    memory_mb        = number
-    disk_gb          = number
-    datastore        = optional(string, "local-lvm")
-    data_disk_gb     = optional(number)
-    data_disk_serial = optional(string, "HOMEFALLOUT_DATA")
-    description      = optional(string, "")
-    labels           = optional(map(string), {})
-    taints           = optional(list(string), [])
+    proxmox_node          = string
+    vmid                  = number
+    ip                    = string
+    role                  = string
+    pool                  = string
+    cores                 = number
+    memory_mb             = number
+    disk_gb               = number
+    datastore             = optional(string, "local")
+    data_disk_gb          = optional(number)
+    data_disk_datastore   = optional(string, "local-lvm")
+    data_disk_serial      = optional(string, "HOMEFALLOUT_DATA")
+    config_disk_gb        = optional(number, 32)
+    config_disk_datastore = optional(string, "local")
+    config_disk_serial    = optional(string, "HOMEFALLOUT_CONFIG")
+    description           = optional(string, "")
+    labels                = optional(map(string), {})
+    taints                = optional(list(string), [])
   }))
+
+  validation {
+    condition     = alltrue([for node in var.nodes : node.disk_gb >= 20])
+    error_message = "An OS disk must be at least 20 GB."
+  }
 
   validation {
     condition     = length([for node in var.nodes : node if node.role == "server"]) % 2 == 1
@@ -131,5 +140,10 @@ variable "nodes" {
   validation {
     condition     = alltrue([for node in var.nodes : node.data_disk_gb == null || node.data_disk_gb >= 100])
     error_message = "A data disk, when configured, must be at least 100 GB."
+  }
+
+  validation {
+    condition     = alltrue([for node in var.nodes : node.config_disk_gb == null || node.config_disk_gb >= 20])
+    error_message = "A config disk, when configured, must be at least 20 GB."
   }
 }

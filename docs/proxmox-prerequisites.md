@@ -12,20 +12,26 @@ pvesm status
 lvs
 ```
 
-The default configuration requests a 64 GB OS disk and a 600 GB thin-provisioned data disk on
-`local-lvm`. Reduce `data_disk_gb` in `terraform.tfvars` if the LVM thin pool is smaller than about
-700 GB. Thin provisioning does not create extra physical capacity: keep the underlying pool below
-80–85% usage.
+The default configuration requests a 32 GB OS disk and a 32 GB application-config disk on the
+directory-backed `local` storage. It requests a separate 600 GB thin-provisioned bulk-data disk on
+`local-lvm`; the rest of that thin pool remains reserved for future Immich/media growth.
 
-## 2. Enable image imports
+Your reported `local` storage has about 83 GB available. The two directory-backed VM disks are
+sparse, but together can grow to 64 GB, so monitor the Proxmox root filesystem and keep at least
+15 GB physically free. Reduce `config_disk_gb` before deployment if other files are added to
+`local`. Sparse images and thin provisioning do not create extra physical capacity.
 
-In the Proxmox UI, open **Datacenter → Storage → local → Edit** and ensure **Import** is included in
-Content. The provider downloads the Ubuntu image directly to this storage using Proxmox's API.
+## 2. Enable image imports and VM disks
+
+In the Proxmox UI, open **Datacenter -> Storage -> local -> Edit** and ensure both **Disk image** and
+**Import** are included in Content. Terraform stores the OS/config disks there and downloads the
+Ubuntu image directly through Proxmox's API. Do this before applying; `local-lvm` already supports
+disk images.
 
 ## 3. Create the Terraform API token
 
-Run these commands in the Proxmox shell. The privilege list follows the current provider guidance;
-this is a dedicated automation identity, not your root account.
+Run these commands in the Proxmox shell. This uses a dedicated automation identity rather than
+your root account.
 
 ```bash
 pveum user add terraform@pve
@@ -50,6 +56,6 @@ agent-backed IP/filesystem reporting in Proxmox; Kubernetes does not require it.
 
 ## 4. Check address reservations
 
-Reserve `10.0.0.10` for the k3s VM and exclude `10.0.0.200–250` from the router's DHCP pool. The
+Reserve `10.0.0.10` for the k3s VM and exclude `10.0.0.200-250` from the router's DHCP pool. The
 laptop is currently on the same `10.0.0.0/24` LAN, so no route or port forward is required for
 `kubectl`.

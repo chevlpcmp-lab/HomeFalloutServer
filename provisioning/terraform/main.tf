@@ -45,7 +45,7 @@ resource "proxmox_virtual_environment_vm" "k3s" {
   dynamic "disk" {
     for_each = each.value.data_disk_gb == null ? [] : [each.value.data_disk_gb]
     content {
-      datastore_id = each.value.datastore
+      datastore_id = each.value.data_disk_datastore
       interface    = "scsi1"
       size         = disk.value
       serial       = each.value.data_disk_serial
@@ -53,6 +53,22 @@ resource "proxmox_virtual_environment_vm" "k3s" {
       iothread     = true
       ssd          = true
       backup       = false
+    }
+  }
+
+  # Application databases and configuration live on Proxmox's directory-backed `local`
+  # storage. Bulk media and photos stay isolated on the `local-lvm` data disk above.
+  dynamic "disk" {
+    for_each = each.value.config_disk_gb == null ? [] : [each.value.config_disk_gb]
+    content {
+      datastore_id = each.value.config_disk_datastore
+      interface    = "scsi2"
+      size         = disk.value
+      serial       = each.value.config_disk_serial
+      discard      = "on"
+      iothread     = true
+      ssd          = true
+      backup       = true
     }
   }
 

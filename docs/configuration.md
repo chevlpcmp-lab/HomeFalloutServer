@@ -1,6 +1,7 @@
 # First-run application wiring
 
-All media applications except Jellyfin share a pod, so use `localhost` for their internal links:
+The VPN-bound media applications share one pod, so use `localhost` for their internal links.
+Homarr, Jellyfin, and Immich are separate components and pods:
 
 | From | To | URL |
 | --- | --- | --- |

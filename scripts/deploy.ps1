@@ -97,7 +97,7 @@ if (-not $SkipGitOps) {
     & (Join-Path $PSScriptRoot 'seal-secrets.ps1') -Kubeconfig $kubeconfig
     $sealedSecrets = @(
         (Join-Path $repoRoot 'platform\components\media-stack\resources\sealed-secret-gluetun-vpn.yaml'),
-        (Join-Path $repoRoot 'platform\components\media-stack\resources\sealed-secret-homarr-secrets.yaml'),
+        (Join-Path $repoRoot 'platform\components\homarr\resources\sealed-secret-homarr-secrets.yaml'),
         (Join-Path $repoRoot 'platform\components\immich\resources\sealed-secret-immich-database.yaml')
     )
     foreach ($sealedSecret in $sealedSecrets) {
