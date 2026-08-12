@@ -3,7 +3,7 @@
 This repository uses the same ownership model as the reference homelab, reduced for one physical
 server:
 
-1. Terraform owns the Proxmox VM and produces the Ansible inventory.
+1. Terraform owns the Proxmox template and three full-clone VMs and produces the Ansible inventory.
 2. Ansible owns the guest OS, data-disk mount, and k3s installation.
 3. Argo CD owns Kubernetes resources after one root Application is applied.
 4. MetalLB owns stable LAN service addresses; the router owns DHCP and DNS.
@@ -28,16 +28,18 @@ kept under the gitignored `platform/secrets/` directory.
 
 | VM | VMID | Node IP | Pool | Workloads |
 | --- | ---: | --- | --- | --- |
-| `k3s-home-01` | 230 | `10.0.0.10` | converged | Kubernetes, GitOps, media, Jellyfin, and Immich |
+| `k3s-cp-01` | 220 | `10.0.0.10` | control | k3s API, scheduler, controller, and etcd |
+| `k3s-apps-01` | 240 | `10.0.0.11` | apps | Homarr and general workloads |
+| `k3s-media-01` | 230 | `10.0.0.12` | media | VPN media pod, Jellyfin, and Immich |
 
-This is intentionally one converged VM. Three VMs on a 16 GB host would provide no physical
-redundancy while wasting memory on three operating systems. It is not highly available: the one
-NVMe, Proxmox host, VM, and k3s node are all failure domains.
+Terraform first creates VMID 9000, `ubuntu-2404-cloudinit-template`, from Ubuntu's cloud image.
+Every node is a full clone of that template. The nodes receive 4/8/16 vCPUs and 2/3/7 GB RAM,
+respectively, using all 28 logical CPUs while leaving roughly 3 GB RAM for Proxmox. The control
+plane is tainted so application pods run on the workers.
 
-The VM gets 10 GB RAM and 12 of the i7-14700's 28 logical CPUs. Proxmox retains roughly 5 GB RAM.
-The VM uses a 32 GB OS disk and 32 GB application-config disk on Proxmox `local`, plus a 600 GB
-bulk-data disk on `local-lvm`. All three still reside on the same physical NVMe; the separation is
-operational, not redundant.
+This is scheduling isolation, not high availability: all VMs, virtual disks, and Kubernetes nodes
+still share one Proxmox host and one NVMe. The single control plane is acceptable for this resource
+budget but is itself a cluster control-plane failure domain.
 
 ## VPN boundary
 

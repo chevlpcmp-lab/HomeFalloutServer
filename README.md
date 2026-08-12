@@ -1,7 +1,8 @@
 # HomeFalloutServer
 
-Infrastructure-as-code for a Proxmox/k3s media homelab on `10.0.0.0/24`. Terraform creates the VM,
-Ansible prepares its data disk and installs k3s, and Argo CD continuously reconciles Immich,
+Infrastructure-as-code for a Proxmox/k3s media homelab on `10.0.0.0/24`. Terraform creates an
+Ubuntu cloud-init template and three full-clone VMs, Ansible prepares the media disk and installs
+k3s, and Argo CD continuously reconciles Immich,
 Sonarr, Radarr, Maintainerr, Homarr, qBittorrent, Gluetun, Prowlarr, FlareSolverr, Bazarr, Seerr,
 and Jellyfin.
 
@@ -19,10 +20,11 @@ manifest by hand.
 
 ## Hardware-specific design
 
-This host has an i7-14700, 16 GB RAM, and one 1 TB NVMe. The configuration creates one 10 GB k3s
-VM instead of three pretend-HA VMs. Proxmox `local` holds a 32 GB OS disk and a 32 GB persistent
-configuration disk; `local-lvm` is reserved for the 600 GB Immich/media disk and future bulk-data
-growth. See [storage](docs/storage.md) for realistic capacity and upgrade advice.
+This host has an i7-14700, 16 GB RAM, and one 1 TB NVMe. The configuration creates a 4-vCPU control
+plane, an 8-vCPU applications worker, and a 16-vCPU media worker. Their OS disks, including all
+application config PVCs, stay on Proxmox `local`; `local-lvm` is reserved for the media worker's
+600 GB Immich/media disk and future bulk-data growth. This spreads scheduling and uses all 28
+logical CPUs, but one physical host and NVMe are still one failure domain. See [storage](docs/storage.md).
 
 ## Service addresses
 
@@ -57,7 +59,7 @@ secrets, and configures a read-only Argo CD deploy key for the private GitHub re
 .\scripts\prepare-workstation.ps1
 ```
 
-Then deploy the VM, k3s, Argo CD, Sealed Secrets, and applications:
+Then deploy the template, three VMs, k3s, Argo CD, Sealed Secrets, and applications:
 
 ```powershell
 .\scripts\deploy.ps1

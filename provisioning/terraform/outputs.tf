@@ -6,15 +6,13 @@ locals {
 
   host_vars = {
     for name, node in var.nodes : name => {
-      ansible_host       = node.ip
-      node_pool          = node.pool
-      node_zone          = node.proxmox_node
-      node_labels        = node.labels
-      node_taints        = node.taints
-      data_disk_serial   = node.data_disk_gb == null ? "" : node.data_disk_serial
-      data_mount_path    = "/mnt/data"
-      config_disk_serial = node.config_disk_gb == null ? "" : node.config_disk_serial
-      config_mount_path  = "/mnt/config"
+      ansible_host     = node.ip
+      node_pool        = node.pool
+      node_zone        = node.proxmox_node
+      node_labels      = node.labels
+      node_taints      = node.taints
+      data_disk_serial = node.data_disk_gb == null ? "" : node.data_disk_serial
+      data_mount_path  = "/mnt/data"
     }
   }
 
@@ -43,14 +41,12 @@ resource "local_sensitive_file" "ansible_inventory" {
 output "cluster_summary" {
   value = {
     for name, node in var.nodes : name => {
-      vmid                  = node.vmid
-      ip                    = node.ip
-      role                  = node.role
-      pool                  = node.pool
-      data_disk_gb          = node.data_disk_gb
-      data_disk_datastore   = node.data_disk_datastore
-      config_disk_gb        = node.config_disk_gb
-      config_disk_datastore = node.config_disk_datastore
+      vmid                = node.vmid
+      ip                  = node.ip
+      role                = node.role
+      pool                = node.pool
+      data_disk_gb        = node.data_disk_gb
+      data_disk_datastore = node.data_disk_datastore
     }
   }
 }

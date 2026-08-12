@@ -11,14 +11,13 @@
           - qemu-guest-agent
         state: present
         update_cache: true
+        lock_timeout: 300
 
-    - name: Inspect unmounted block devices
+    - name: Inspect whole block devices
       ansible.builtin.command: lsblk --json --nodeps --output PATH,SERIAL,SIZE,TYPE
       register: block_devices
       changed_when: false
-      when: >-
-        data_disk_serial | default('') | length > 0 or
-        config_disk_serial | default('') | length > 0
+      when: data_disk_serial | default('') | length > 0
 
     - name: Resolve the Terraform data disk by its unique serial
       ansible.builtin.set_fact:
@@ -29,15 +28,6 @@
               | map(attribute='path') | list | first) | default('') }}
       when: data_disk_serial | default('') | length > 0
 
-    - name: Resolve the Terraform config disk by its unique serial
-      ansible.builtin.set_fact:
-        config_disk_device: >-
-          {{ ((block_devices.stdout | from_json).blockdevices
-              | selectattr('serial', 'equalto', config_disk_serial)
-              | selectattr('type', 'equalto', 'disk')
-              | map(attribute='path') | list | first) | default('') }}
-      when: config_disk_serial | default('') | length > 0
-
     - name: Refuse to guess which disk holds application data
       ansible.builtin.assert:
         that:
@@ -46,15 +36,6 @@
           No whole disk with serial {{ data_disk_serial }} was found. Check `lsblk -o
           PATH,SERIAL,SIZE,TYPE` before continuing; this playbook will not guess a device.
       when: data_disk_serial | default('') | length > 0
-
-    - name: Refuse to guess which disk holds application configuration
-      ansible.builtin.assert:
-        that:
-          - config_disk_device | length > 0
-        fail_msg: >-
-          No whole disk with serial {{ config_disk_serial }} was found. Check `lsblk -o
-          PATH,SERIAL,SIZE,TYPE` before continuing; this playbook will not guess a device.
-      when: config_disk_serial | default('') | length > 0
 
     - name: Check whether the data disk already has a filesystem
       ansible.builtin.command: "blkid -s TYPE -o value {{ data_disk_device }}"
@@ -86,6 +67,7 @@
         path: "{{ data_mount_path }}"
         state: directory
         mode: "0755"
+      when: data_disk_device | default('') | length > 0
 
     - name: Persist the data disk mount by filesystem label
       ansible.builtin.lineinfile:
@@ -93,66 +75,22 @@
         regexp: '^LABEL=homefallout-data\s+'
         line: "LABEL=homefallout-data {{ data_mount_path }} ext4 defaults,noatime 0 2"
         state: present
+      when: data_disk_device | default('') | length > 0
 
     - name: Check whether the data disk is mounted
       ansible.builtin.command: "findmnt --mountpoint {{ data_mount_path }}"
       register: data_mount_status
       changed_when: false
       failed_when: false
+      when: data_disk_device | default('') | length > 0
 
     - name: Mount the application data disk
       ansible.builtin.command: "mount {{ data_mount_path }}"
-      when: data_mount_status.rc != 0
-
-    - name: Check whether the config disk already has a filesystem
-      ansible.builtin.command: "blkid -s TYPE -o value {{ config_disk_device }}"
-      register: config_disk_filesystem
-      changed_when: false
-      failed_when: false
-      when: config_disk_device | default('') | length > 0
-
-    - name: Initialize the blank Terraform config disk as ext4
-      ansible.builtin.command: "mkfs.ext4 -L homefallout-config {{ config_disk_device }}"
       when:
-        - initialize_config_disk | bool
-        - config_disk_device | default('') | length > 0
-        - config_disk_filesystem.rc != 0
+        - data_disk_device | default('') | length > 0
+        - data_mount_status.rc != 0
 
-    - name: Refuse an unexpected filesystem on the config disk
-      ansible.builtin.assert:
-        that:
-          - config_disk_filesystem.stdout in ['ext4']
-        fail_msg: >-
-          The config disk already contains {{ config_disk_filesystem.stdout | default('an unknown
-          filesystem') }}. It was not changed; inspect it manually before continuing.
-      when:
-        - config_disk_device | default('') | length > 0
-        - config_disk_filesystem.rc == 0
-
-    - name: Create the config mount point
-      ansible.builtin.file:
-        path: "{{ config_mount_path }}"
-        state: directory
-        mode: "0755"
-
-    - name: Persist the config disk mount by filesystem label
-      ansible.builtin.lineinfile:
-        path: /etc/fstab
-        regexp: '^LABEL=homefallout-config\s+'
-        line: "LABEL=homefallout-config {{ config_mount_path }} ext4 defaults,noatime 0 2"
-        state: present
-
-    - name: Check whether the config disk is mounted
-      ansible.builtin.command: "findmnt --mountpoint {{ config_mount_path }}"
-      register: config_mount_status
-      changed_when: false
-      failed_when: false
-
-    - name: Mount the application config disk
-      ansible.builtin.command: "mount {{ config_mount_path }}"
-      when: config_mount_status.rc != 0
-
-    - name: Create the local-path provisioner root on the config disk
+    - name: Create the local-path provisioner root on the local-backed OS disk
       ansible.builtin.file:
         path: "{{ k3s_local_storage_path }}"
         state: directory
@@ -171,6 +109,7 @@
         - "{{ data_mount_path }}/media/library/movies"
         - "{{ data_mount_path }}/media/library/tv"
         - "{{ data_mount_path }}/photos"
+      when: data_disk_device | default('') | length > 0
 
     - name: Download k3s installer
       ansible.builtin.get_url:

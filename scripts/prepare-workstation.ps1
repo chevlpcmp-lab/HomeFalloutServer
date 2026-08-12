@@ -125,24 +125,45 @@ ssh_public_keys = [
 k3s_token = "$k3sToken"
 
 nodes = {
-  "k3s-home-01" = {
-    proxmox_node    = "home"
-    vmid            = 230
-    ip              = "10.0.0.10"
-    role            = "server"
-    pool            = "converged"
-    cores           = 12
-    memory_mb       = 10240
-    disk_gb         = 32
-    datastore       = "local"
-    data_disk_gb    = 600
+  "k3s-cp-01" = {
+    proxmox_node = "home"
+    vmid = 220
+    ip = "10.0.0.10"
+    role = "server"
+    pool = "control"
+    cores = 4
+    memory_mb = 2048
+    disk_gb = 20
+    datastore = "local"
+    description = "k3s control plane"
+    taints = ["node-role.kubernetes.io/control-plane=true:NoSchedule"]
+  }
+  "k3s-apps-01" = {
+    proxmox_node = "home"
+    vmid = 240
+    ip = "10.0.0.11"
+    role = "agent"
+    pool = "apps"
+    cores = 8
+    memory_mb = 3072
+    disk_gb = 20
+    datastore = "local"
+    description = "k3s applications worker"
+  }
+  "k3s-media-01" = {
+    proxmox_node = "home"
+    vmid = 230
+    ip = "10.0.0.12"
+    role = "agent"
+    pool = "media"
+    cores = 16
+    memory_mb = 7168
+    disk_gb = 28
+    datastore = "local"
+    data_disk_gb = 600
     data_disk_datastore = "local-lvm"
     data_disk_serial = "HOMEFALLOUT_DATA"
-    config_disk_gb = 32
-    config_disk_datastore = "local"
-    config_disk_serial = "HOMEFALLOUT_CONFIG"
-    description     = "Single-node k3s: media, Jellyfin, Immich, and GitOps"
-    labels          = { "node-role.kubernetes.io/worker" = "true" }
+    description = "k3s media, Jellyfin, and Immich worker"
   }
 }
 "@

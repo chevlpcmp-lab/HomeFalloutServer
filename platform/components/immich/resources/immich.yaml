@@ -28,7 +28,7 @@ spec:
     metadata:
       labels: { app: immich-postgres }
     spec:
-      nodeSelector: { homelab.charles/pool: converged }
+      nodeSelector: { homelab.charles/pool: media }
       containers:
         - name: postgres
           image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3
@@ -72,7 +72,7 @@ spec:
     metadata:
       labels: { app: immich-redis }
     spec:
-      nodeSelector: { homelab.charles/pool: converged }
+      nodeSelector: { homelab.charles/pool: media }
       containers:
         - name: redis
           image: docker.io/valkey/valkey:8.1-alpine
@@ -104,7 +104,7 @@ spec:
       labels: { app: immich-machine-learning }
     spec:
       enableServiceLinks: false
-      nodeSelector: { homelab.charles/pool: converged }
+      nodeSelector: { homelab.charles/pool: media }
       containers:
         - name: machine-learning
           image: ghcr.io/immich-app/immich-machine-learning:release
@@ -142,7 +142,7 @@ spec:
     spec:
       # Prevent the Service named immich from injecting IMMICH_PORT=tcp://... .
       enableServiceLinks: false
-      nodeSelector: { homelab.charles/pool: converged }
+      nodeSelector: { homelab.charles/pool: media }
       containers:
         - name: server
           image: ghcr.io/immich-app/immich-server:release

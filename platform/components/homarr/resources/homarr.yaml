@@ -23,7 +23,7 @@ spec:
       labels: { app: homarr }
     spec:
       nodeSelector:
-        homelab.charles/pool: converged
+        homelab.charles/pool: apps
       securityContext:
         fsGroup: 1000
       containers:

@@ -64,25 +64,39 @@ if (-not $SkipTerraform) {
 }
 
 if (-not $SkipAnsible) {
-    Write-Host 'Waiting for cloud-init to bring SSH online at 10.0.0.10...'
-    Wait-TcpPort -ComputerName '10.0.0.10' -Port 22 -TimeoutSeconds 600
+    $clusterIps = @('10.0.0.10', '10.0.0.11', '10.0.0.12')
+    foreach ($clusterIp in $clusterIps) {
+        Write-Host "Waiting for cloud-init to bring SSH online at $clusterIp..."
+        Wait-TcpPort -ComputerName $clusterIp -Port 22 -TimeoutSeconds 600
+    }
 
     $distros = (wsl --list --quiet) -replace "`0", ''
     if ($distros -notcontains 'Ubuntu-24.04') {
         throw 'Ubuntu-24.04 WSL is required. Follow the instruction from prepare-workstation.ps1.'
     }
 
-    $wslRepo = (wsl -d Ubuntu-24.04 -- wslpath -a $repoRoot).Trim()
+    # wsl.exe passes backslashes through a Linux shell where they are escape characters.
+    # Forward slashes preserve Windows drive paths for wslpath on PowerShell 5.1.
+    $repoRootForWsl = $repoRoot.Replace('\', '/')
+    $wslRepo = (wsl -d Ubuntu-24.04 -- wslpath -a $repoRootForWsl | Out-String).Trim()
+    if ([string]::IsNullOrWhiteSpace($wslRepo)) {
+        throw "Could not translate repository path $repoRoot into WSL."
+    }
     $windowsSshKey = Join-Path $env:USERPROFILE '.ssh\homefallout_ed25519'
     if (-not (Test-Path -LiteralPath $windowsSshKey)) {
         throw 'The HomeFallout SSH key is missing. Run prepare-workstation.ps1 first.'
     }
-    $wslSshKey = (wsl -d Ubuntu-24.04 -- wslpath -a $windowsSshKey).Trim()
+    $windowsSshKeyForWsl = $windowsSshKey.Replace('\', '/')
+    $wslSshKey = (wsl -d Ubuntu-24.04 -- wslpath -a $windowsSshKeyForWsl | Out-String).Trim()
+    if ([string]::IsNullOrWhiteSpace($wslSshKey)) {
+        throw "Could not translate SSH key path $windowsSshKey into WSL."
+    }
     wsl -d Ubuntu-24.04 -- bash -lc "mkdir -p /root/.ssh && chmod 700 /root/.ssh && install -m 600 '$wslSshKey' /root/.ssh/id_ed25519"
     wsl -d Ubuntu-24.04 -- bash -lc "command -v ansible-playbook >/dev/null || (sudo apt-get update && sudo apt-get install -y ansible-core)"
     # /mnt/c is world-writable from Linux's perspective, so Ansible intentionally ignores
     # ansible.cfg there. Pass the generated inventory explicitly.
     wsl -d Ubuntu-24.04 -- bash -lc "cd '$wslRepo/provisioning/ansible' && ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook -i inventory.generated.yml playbooks/cluster.yml"
+    if ($LASTEXITCODE -ne 0) { throw 'Ansible cluster configuration failed.' }
 }
 
 if (-not $SkipGitOps) {

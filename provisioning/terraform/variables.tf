@@ -33,6 +33,24 @@ variable "cloud_image_url" {
   default     = "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
 }
 
+variable "template_vmid" {
+  description = "VMID of the Terraform-owned Ubuntu cloud-init template"
+  type        = number
+  default     = 9000
+}
+
+variable "template_name" {
+  description = "Name of the reusable Ubuntu cloud-init template"
+  type        = string
+  default     = "ubuntu-2404-cloudinit-template"
+}
+
+variable "template_datastore" {
+  description = "Directory-backed Proxmox storage for the reusable template"
+  type        = string
+  default     = "local"
+}
+
 variable "qemu_guest_agent_enabled" {
   description = "Set true on the second Terraform apply, after Ansible installs the agent"
   type        = bool
@@ -82,24 +100,21 @@ variable "k3s_token" {
 variable "nodes" {
   description = "k3s VMs keyed by their permanent hostname"
   type = map(object({
-    proxmox_node          = string
-    vmid                  = number
-    ip                    = string
-    role                  = string
-    pool                  = string
-    cores                 = number
-    memory_mb             = number
-    disk_gb               = number
-    datastore             = optional(string, "local")
-    data_disk_gb          = optional(number)
-    data_disk_datastore   = optional(string, "local-lvm")
-    data_disk_serial      = optional(string, "HOMEFALLOUT_DATA")
-    config_disk_gb        = optional(number, 32)
-    config_disk_datastore = optional(string, "local")
-    config_disk_serial    = optional(string, "HOMEFALLOUT_CONFIG")
-    description           = optional(string, "")
-    labels                = optional(map(string), {})
-    taints                = optional(list(string), [])
+    proxmox_node        = string
+    vmid                = number
+    ip                  = string
+    role                = string
+    pool                = string
+    cores               = number
+    memory_mb           = number
+    disk_gb             = number
+    datastore           = optional(string, "local")
+    data_disk_gb        = optional(number)
+    data_disk_datastore = optional(string, "local-lvm")
+    data_disk_serial    = optional(string, "HOMEFALLOUT_DATA")
+    description         = optional(string, "")
+    labels              = optional(map(string), {})
+    taints              = optional(list(string), [])
   }))
 
   validation {
@@ -118,8 +133,8 @@ variable "nodes" {
   }
 
   validation {
-    condition     = alltrue([for node in var.nodes : contains(["control", "media", "apps", "converged"], node.pool)])
-    error_message = "Node pool must be control, media, apps, or converged."
+    condition     = alltrue([for node in var.nodes : contains(["control", "media", "apps"], node.pool)])
+    error_message = "Node pool must be control, media, or apps."
   }
 
   validation {
@@ -142,8 +157,4 @@ variable "nodes" {
     error_message = "A data disk, when configured, must be at least 100 GB."
   }
 
-  validation {
-    condition     = alltrue([for node in var.nodes : node.config_disk_gb == null || node.config_disk_gb >= 20])
-    error_message = "A config disk, when configured, must be at least 20 GB."
-  }
 }

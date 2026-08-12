@@ -5,18 +5,20 @@ application configuration, and large user data so their capacity and backup poli
 
 | Proxmox storage | Virtual disk | Guest path | Purpose |
 | --- | ---: | --- | --- |
-| `local` | 32 GB | `/` | Ubuntu, k3s, container images, and etcd |
-| `local` | 32 GB | `/mnt/config` | Every persistent application config/database/cache PVC |
-| `local-lvm` | 600 GB | `/mnt/data` | Downloads, movies, TV, and Immich originals/uploads |
+| `local` | 20 GB | control `/` | Ubuntu, k3s control plane, and etcd |
+| `local` | 20 GB | apps `/` | Ubuntu, images, and Homarr config PVC |
+| `local` | 28 GB | media `/` | Ubuntu, images, and media/Immich config and database PVCs |
+| `local-lvm` | 600 GB | media `/mnt/data` | Downloads, movies, TV, and Immich originals/uploads |
 
 The remaining unallocated `local-lvm` capacity is deliberately reserved for future media/photo
 growth. It is not consumed by application configuration.
 
 ## Persistent application state
 
-Ansible identifies the config disk by the `HOMEFALLOUT_CONFIG` serial, formats it only if blank,
-and mounts it at `/mnt/config`. K3s's local-path provisioner creates volumes under
-`/mnt/config/k3s-storage`; every application PVC explicitly selects `config-local-retain`.
+K3s's local-path provisioner creates volumes under `/var/lib/rancher/k3s/storage` on the worker
+where a pod is scheduled. Because every node OS disk is on Proxmox `local`, application config and
+databases remain on `local`; node selectors keep each PVC with its intended worker. Every
+application PVC explicitly selects `config-local-retain`.
 
 This includes:
 
@@ -30,9 +32,9 @@ cache; authoritative Immich state is in Postgres and the photo library. Kubernet
 and the Sealed Secrets controller state live in etcd on the OS disk, while the sealing-key export
 must also be copied to encrypted storage outside this server.
 
-The PVC requests total less than the 32 GB config disk, but the local-path provisioner does not
-enforce per-PVC quotas. Monitor `/mnt/config` and keep at least 8 GB free. A `Retain` reclaim policy
-protects against automatic deletion; it is not a backup.
+The local-path provisioner does not enforce per-PVC quotas. Monitor both worker root filesystems,
+especially the 28 GB media worker disk. A `Retain` reclaim policy protects against automatic
+deletion; it is not a backup.
 
 ## Bulk media and photos
 
@@ -60,21 +62,20 @@ the same 600 GB filesystem. Keep the Proxmox thin pool below roughly 80-85% actu
 
 ## Why Longhorn is not installed
 
-Longhorn's availability comes from replicas placed on separate storage nodes. This cluster has
-one node, one Proxmox host, and one physical NVMe, so additional replicas would share the same
-failure domain while consuming extra capacity, memory, and I/O. Longhorn's own current best
-practices recommend three nodes and dedicated disks for its V1 data engine.
+Longhorn's availability comes from replicas placed on independent storage nodes. Although this
+cluster has three VMs, all of them share one Proxmox host, one root filesystem, and one physical
+NVMe. Replicas would share the same failure domain while consuming scarce capacity, RAM, and I/O.
 
-Local ext4 volumes are simpler here. Add Longhorn only after adding multiple Kubernetes nodes with
-independent disks. Even then, use an external NFS/S3 backup target: Longhorn snapshots remain on
-cluster disks, while backups are what survive loss of the cluster.
+Local ext4 volumes are simpler here. Add Longhorn only after adding physical nodes with independent
+disks. Even then, use an external NFS/S3 backup target: snapshots on this server do not survive its
+loss.
 
 ## Recommended upgrade order
 
 1. Add a conventional 8-16 TB SATA CMR hard drive for media and photos. Keep databases and
    configuration on NVMe.
 2. Upgrade to 32 GB RAM so Immich ML and Jellyfin transcoding cannot starve Proxmox.
-3. Add an external backup target for `/mnt/config`, Immich originals, and the sealing key.
+3. Add an external backup target for worker PVC data, Immich originals, and the sealing key.
 
 Until an HDD is added, expect roughly 450-520 GB of practical media/photo capacity after download
 staging and safety headroom. Configure qBittorrent to remove completed downloads after import and

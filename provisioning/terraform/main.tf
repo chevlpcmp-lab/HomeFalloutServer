@@ -14,6 +14,52 @@ resource "proxmox_download_file" "ubuntu_cloud_image" {
   overwrite    = false
 }
 
+# Terraform owns the reusable base template. Nodes are full clones so each VM has
+# an independent OS disk while sharing the same tested cloud image and hardware model.
+resource "proxmox_virtual_environment_vm" "ubuntu_template" {
+  name      = var.template_name
+  node_name = var.cloud_image_node
+  vm_id     = var.template_vmid
+  template  = true
+  started   = false
+  on_boot   = false
+
+  cpu {
+    cores = 2
+    type  = "host"
+  }
+
+  memory {
+    dedicated = 1024
+  }
+
+  disk {
+    datastore_id = var.template_datastore
+    import_from  = proxmox_download_file.ubuntu_cloud_image.id
+    interface    = "scsi0"
+    size         = 4
+    file_format  = "qcow2"
+    discard      = "on"
+    iothread     = true
+    ssd          = true
+  }
+
+  network_device {
+    bridge = var.network_bridge
+    model  = "virtio"
+  }
+
+  scsi_hardware = "virtio-scsi-single"
+
+  serial_device {
+    device = "socket"
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
 resource "proxmox_virtual_environment_vm" "k3s" {
   for_each = var.nodes
 
@@ -22,6 +68,13 @@ resource "proxmox_virtual_environment_vm" "k3s" {
   vm_id       = each.value.vmid
   description = each.value.description
   tags        = ["k3s", "terraform", each.value.pool]
+
+  clone {
+    vm_id        = proxmox_virtual_environment_vm.ubuntu_template.vm_id
+    node_name    = proxmox_virtual_environment_vm.ubuntu_template.node_name
+    datastore_id = each.value.datastore
+    full         = true
+  }
 
   cpu {
     cores = each.value.cores
@@ -34,9 +87,9 @@ resource "proxmox_virtual_environment_vm" "k3s" {
 
   disk {
     datastore_id = each.value.datastore
-    import_from  = proxmox_download_file.ubuntu_cloud_image.id
     interface    = "scsi0"
     size         = each.value.disk_gb
+    file_format  = "qcow2"
     discard      = "on"
     iothread     = true
     ssd          = true
@@ -49,26 +102,11 @@ resource "proxmox_virtual_environment_vm" "k3s" {
       interface    = "scsi1"
       size         = disk.value
       serial       = each.value.data_disk_serial
+      file_format  = "raw"
       discard      = "on"
       iothread     = true
       ssd          = true
       backup       = false
-    }
-  }
-
-  # Application databases and configuration live on Proxmox's directory-backed `local`
-  # storage. Bulk media and photos stay isolated on the `local-lvm` data disk above.
-  dynamic "disk" {
-    for_each = each.value.config_disk_gb == null ? [] : [each.value.config_disk_gb]
-    content {
-      datastore_id = each.value.config_disk_datastore
-      interface    = "scsi2"
-      size         = disk.value
-      serial       = each.value.config_disk_serial
-      discard      = "on"
-      iothread     = true
-      ssd          = true
-      backup       = true
     }
   }
 
@@ -86,6 +124,8 @@ resource "proxmox_virtual_environment_vm" "k3s" {
 
   initialization {
     datastore_id = each.value.datastore
+    interface    = "ide2"
+    file_format  = "qcow2"
 
     ip_config {
       ipv4 {
@@ -118,8 +158,8 @@ resource "proxmox_virtual_environment_vm" "k3s" {
 
     # Proxmox and cloud-init normalize these fields after first boot.
     ignore_changes = [
-      initialization,
       network_device,
+      clone,
     ]
   }
 }

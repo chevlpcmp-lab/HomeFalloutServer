@@ -33,7 +33,7 @@ spec:
       labels: { app: jellyfin }
     spec:
       nodeSelector:
-        homelab.charles/pool: converged
+        homelab.charles/pool: media
       containers:
         - name: jellyfin
           image: docker.io/jellyfin/jellyfin:latest

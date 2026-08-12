@@ -34,6 +34,6 @@ The two results must match the VPN address, not the home's public address.
 ## Jellyfin hardware transcoding
 
 The default manifest uses CPU transcoding. After passing the Intel iGPU through Proxmox to
-`k3s-home-01`, add a `hostPath` volume for `/dev/dri`, mount it at `/dev/dri` in
+`k3s-media-01`, add a `hostPath` volume for `/dev/dri`, mount it at `/dev/dri` in
 the Jellyfin container, and configure VA-API or QSV in Jellyfin. Confirm the worker sees the device
 before changing the manifest.
