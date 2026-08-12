@@ -1,0 +1,15 @@
+# Linux-side tooling consumes the infrastructure and Kubernetes files.
+.gitattributes text eol=lf
+*.yaml   text eol=lf
+*.yml    text eol=lf
+*.tpl    text eol=lf
+*.tf     text eol=lf
+*.tfvars text eol=lf
+*.sh     text eol=lf
+*.py     text eol=lf
+*.md     text eol=lf
+*.json   text eol=lf
+*.cfg    text eol=lf
+
+# Workstation automation is run by Windows PowerShell 5.1.
+*.ps1    text eol=crlf

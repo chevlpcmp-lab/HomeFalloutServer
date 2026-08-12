@@ -5,6 +5,18 @@ Ansible prepares its data disk and installs k3s, and Argo CD continuously reconc
 Sonarr, Radarr, Maintainerr, Homarr, qBittorrent, Gluetun, Prowlarr, FlareSolverr, Bazarr, Seerr,
 and Jellyfin.
 
+The GitOps layout follows the reference repository's component contract:
+
+```text
+platform/components/<name>/
+  pre-resources/   # optional prerequisites, applied before an upstream chart
+  values/          # versioned Helm values
+  resources/       # manifests applied after the chart
+```
+
+The root platform chart derives Argo CD sync waves from tiers instead of assigning a wave to every
+manifest by hand.
+
 ## Hardware-specific design
 
 This host has an i7-14700, 16 GB RAM, and one 1 TB NVMe. The configuration creates one 10 GB k3s
@@ -44,11 +56,16 @@ secrets, and configures a read-only Argo CD deploy key for the private GitHub re
 .\scripts\prepare-workstation.ps1
 ```
 
-Then deploy the VM, k3s, Argo CD, secrets, and applications:
+Then deploy the VM, k3s, Argo CD, Sealed Secrets, and applications:
 
 ```powershell
 .\scripts\deploy.ps1
 ```
+
+On its first run, the deployment seals the gitignored plaintext inputs with this cluster's public
+key, applies the encrypted resources, and backs up the controller key to a gitignored file. Commit
+and push the generated `sealed-secret-*.yaml` files afterward; copy the controller-key backup to
+encrypted storage outside this server. See [secret management](docs/secrets.md).
 
 The deployment fetches the admin kubeconfig to `provisioning/ansible/kubeconfig`. Use it from this
 laptop with:
@@ -84,13 +101,18 @@ ansible-playbook -i inventory.generated.yml playbooks/cluster.yml
 cd ../..
 ```
 
-Then apply the root app and the two generated, gitignored secret files:
+Then apply the root app, wait for the Sealed Secrets controller, and create the encrypted manifests:
 
 ```powershell
 .\scripts\bootstrap.ps1
-kubectl --kubeconfig provisioning/ansible/kubeconfig apply -f platform/secrets/media-secrets.yaml
-kubectl --kubeconfig provisioning/ansible/kubeconfig apply -f platform/secrets/immich-secrets.yaml
+kubectl --kubeconfig provisioning/ansible/kubeconfig rollout status deployment/sealed-secrets-controller -n secrets --timeout=5m
+.\scripts\seal-secrets.ps1
+kubectl --kubeconfig provisioning/ansible/kubeconfig apply -f platform/components/media-stack/resources/sealed-secret-gluetun-vpn.yaml
+kubectl --kubeconfig provisioning/ansible/kubeconfig apply -f platform/components/media-stack/resources/sealed-secret-homarr-secrets.yaml
+kubectl --kubeconfig provisioning/ansible/kubeconfig apply -f platform/components/immich/resources/sealed-secret-immich-database.yaml
+.\scripts\backup-sealing-key.ps1
 ```
 
-Read [architecture](docs/architecture.md), [storage](docs/storage.md), and
-[first-run wiring](docs/configuration.md) before adding downloads or importing photos.
+Read [architecture](docs/architecture.md), [storage](docs/storage.md),
+[secret management](docs/secrets.md), and [first-run wiring](docs/configuration.md) before adding
+downloads or importing photos.

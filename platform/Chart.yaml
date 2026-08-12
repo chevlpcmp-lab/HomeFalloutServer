@@ -1,6 +1,8 @@
 apiVersion: v2
-name: homefallout-platform
-description: Argo CD application generator for the HomeFalloutServer homelab
+name: platform
+description: >-
+  Renders the Argo CD Applications, AppProjects, and deployment ordering for the
+  HomeFalloutServer platform from one values file.
 type: application
 version: 0.1.0
-
+appVersion: "1.0.0"

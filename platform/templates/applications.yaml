@@ -1,35 +1,84 @@
-{{- range .Values.components }}
+{{- range $c := .Values.components }}
+{{- $enabled := include "platform.bool" (dict "ctx" $c "key" "enabled" "default" true) }}
+{{- if $enabled }}
+{{- $pre := $c.preResources | default dict }}
+{{- $post := $c.resources | default dict }}
+{{- $project := include "platform.project" (dict "root" $ "component" $c) }}
+{{- $hasChart := and $c.chart $c.chart.repoURL $c.chart.name $c.chart.version }}
+
+{{- if $pre.enabled }}
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: {{ .name }}
+  name: {{ $c.name }}-pre
   namespace: argocd
+  labels:
+    {{- include "platform.labels" (dict "component" $c) | nindent 4 }}
   annotations:
-    argocd.argoproj.io/sync-wave: {{ .wave | quote }}
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
+    argocd.argoproj.io/sync-wave: "{{ include "platform.wave" (dict "root" $ "component" $c "phase" -1) }}"
+  finalizers: [resources-finalizer.argocd.argoproj.io]
 spec:
-  project: default
-  source:
-    {{ if .chart }}
-    repoURL: {{ .chart.repoURL }}
-    chart: {{ .chart.name }}
-    targetRevision: {{ .chart.version | quote }}
-    {{ else }}
-    repoURL: {{ $.Values.repo.url }}
-    targetRevision: {{ $.Values.repo.revision }}
-    path: {{ .path }}
-    directory:
-      recurse: true
-    {{ end }}
+  project: {{ $project }}
+  {{- include "platform.gitSource" (dict "root" $ "component" $c "dir" "pre-resources") | nindent 2 }}
   destination:
     server: https://kubernetes.default.svc
-    namespace: {{ .namespace }}
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - CreateNamespace=true
+    namespace: {{ $pre.namespace | default $c.namespace }}
+  {{- include "platform.ignoreDifferences" . | nindent 2 }}
+  {{- include "platform.syncPolicy" . | nindent 2 }}
+{{- end }}
+
+{{- if $hasChart }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ $c.name }}
+  namespace: argocd
+  labels:
+    {{- include "platform.labels" (dict "component" $c) | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "{{ include "platform.wave" (dict "root" $ "component" $c "phase" 0) }}"
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: {{ $project }}
+  sources:
+    - repoURL: {{ $c.chart.repoURL }}
+      chart: {{ $c.chart.name }}
+      targetRevision: {{ $c.chart.version | quote }}
+      helm:
+        valueFiles:
+          - $values/platform/components/{{ $c.name }}/values/chart-{{ $.Values.environment }}.yaml
+    - repoURL: {{ $.Values.repo.url }}
+      targetRevision: {{ $.Values.repo.revision }}
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: {{ $c.namespace }}
+  {{- include "platform.ignoreDifferences" . | nindent 2 }}
+  {{- include "platform.syncPolicy" . | nindent 2 }}
+{{- end }}
+
+{{- if $post.enabled }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ $c.name }}-resources
+  namespace: argocd
+  labels:
+    {{- include "platform.labels" (dict "component" $c) | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "{{ include "platform.wave" (dict "root" $ "component" $c "phase" 1) }}"
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: {{ $project }}
+  {{- include "platform.gitSource" (dict "root" $ "component" $c "dir" "resources") | nindent 2 }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: {{ $post.namespace | default $c.namespace }}
+  {{- include "platform.ignoreDifferences" . | nindent 2 }}
+  {{- include "platform.syncPolicy" . | nindent 2 }}
+{{- end }}
+{{- end }}
 {{- end }}

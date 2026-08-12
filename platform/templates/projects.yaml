@@ -1,0 +1,35 @@
+{{- range $name, $project := .Values.projects }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: {{ $name }}
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-10"
+spec:
+  description: {{ $project.description | quote }}
+  sourceRepos:
+    {{- $repos := list $.Values.repo.url }}
+    {{- range $component := $.Values.components }}
+    {{- $componentProject := default $.Values.defaults.project $component.project }}
+    {{- if and (eq $componentProject $name) $component.chart $component.chart.repoURL }}
+    {{- $repos = append $repos $component.chart.repoURL }}
+    {{- end }}
+    {{- end }}
+    {{- range $repo := ($repos | uniq | sortAlpha) }}
+    - {{ $repo }}
+    {{- end }}
+  destinations:
+    {{- range $namespace := $project.destinations }}
+    - server: https://kubernetes.default.svc
+      namespace: {{ $namespace | quote }}
+    {{- end }}
+  {{- if $project.clusterResourceWhitelist }}
+  clusterResourceWhitelist:
+    {{- toYaml $project.clusterResourceWhitelist | nindent 4 }}
+  {{- end }}
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+{{- end }}

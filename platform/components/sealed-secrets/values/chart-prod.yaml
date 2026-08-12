@@ -1,0 +1,2 @@
+# Keep the controller name stable so every workstation script can find it.
+fullnameOverride: sealed-secrets-controller

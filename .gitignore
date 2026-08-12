@@ -8,6 +8,7 @@ provisioning/ansible/kubeconfig
 *.retry
 .idea/
 .vscode/
+.tools/
 
 # Never commit unencrypted Kubernetes secrets.
 platform/secrets/*.yaml

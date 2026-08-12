@@ -8,6 +8,22 @@ server:
 3. Argo CD owns Kubernetes resources after one root Application is applied.
 4. MetalLB owns stable LAN service addresses; the router owns DHCP and DNS.
 
+## GitOps component layout
+
+The platform chart follows the reference repository's component model. Each entry in
+`platform/values/values-prod.yaml` can produce up to three Argo CD Applications:
+
+| Phase | Directory/source | Relative sync wave |
+| --- | --- | ---: |
+| prerequisites | `pre-resources/` | tier - 1 |
+| upstream Helm chart | chart plus `values/chart-prod.yaml` | tier |
+| owned manifests | `resources/` | tier + 1 |
+
+This lab currently needs chart-plus-resources for MetalLB, a chart for Sealed Secrets, and
+resources-only components for the local storage and applications. Encrypted application secrets
+are stored with their owning component. Plaintext inputs and the Sealed Secrets recovery key are
+kept under the gitignored `platform/secrets/` directory.
+
 ## Topology
 
 | VM | VMID | Node IP | Pool | Workloads |

@@ -11,6 +11,9 @@ $sshDir = Join-Path $env:USERPROFILE '.ssh'
 $sshKey = Join-Path $sshDir 'homefallout_ed25519'
 $argocdKey = Join-Path $sshDir 'homefallout_argocd_ed25519'
 $tfvarsPath = Join-Path $terraformDir 'terraform.tfvars'
+$toolsDir = Join-Path $repoRoot '.tools'
+$kubesealVersion = '0.38.4'
+$kubesealPath = Join-Path $toolsDir 'kubeseal.exe'
 
 function New-RandomHex([int]$Bytes) {
     $buffer = [byte[]]::new($Bytes)
@@ -23,10 +26,41 @@ function New-RandomHex([int]$Bytes) {
     return ([BitConverter]::ToString($buffer) -replace '-', '').ToLowerInvariant()
 }
 
-if (-not (Get-Command terraform -ErrorAction SilentlyContinue)) {
-    Write-Host 'Installing Terraform with winget...'
-    winget install --id Hashicorp.Terraform --exact --accept-package-agreements --accept-source-agreements
-    Write-Warning 'If terraform is not found in this terminal, close and reopen PowerShell after this script.'
+$terraformCommand = Get-Command terraform -ErrorAction SilentlyContinue
+if (-not $terraformCommand) {
+    $wingetTerraform = Get-ChildItem -Path "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\Hashicorp.Terraform_*" -Filter terraform.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($wingetTerraform) {
+        $env:PATH = "$($wingetTerraform.DirectoryName);$env:PATH"
+    } else {
+        Write-Host 'Installing Terraform with winget...'
+        winget install --id Hashicorp.Terraform --exact --accept-package-agreements --accept-source-agreements
+        Write-Warning 'If terraform is not found in this terminal, close and reopen PowerShell after this script.'
+    }
+}
+
+if (-not (Get-Command kubeseal -ErrorAction SilentlyContinue) -and -not (Test-Path -LiteralPath $kubesealPath)) {
+    Write-Host "Installing kubeseal $kubesealVersion into the repository-local .tools directory..."
+    New-Item -ItemType Directory -Path $toolsDir -Force | Out-Null
+    $kubesealArchive = Join-Path ([System.IO.Path]::GetTempPath()) "kubeseal-$kubesealVersion-windows-amd64.tar.gz"
+    try {
+        $kubesealUrl = "https://github.com/bitnami/sealed-secrets/releases/download/v$kubesealVersion/kubeseal-$kubesealVersion-windows-amd64.tar.gz"
+        try {
+            Invoke-WebRequest -Uri $kubesealUrl -OutFile $kubesealArchive -UseBasicParsing
+        } catch {
+            if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { throw }
+            Write-Warning 'Direct kubeseal download failed; retrying through GitHub CLI.'
+            & gh release download "v$kubesealVersion" --repo bitnami/sealed-secrets --pattern "kubeseal-$kubesealVersion-windows-amd64.tar.gz" --output $kubesealArchive --clobber
+            if ($LASTEXITCODE -ne 0) { throw 'GitHub CLI could not download kubeseal.' }
+        }
+        & tar -xzf $kubesealArchive -C $toolsDir kubeseal.exe
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $kubesealPath)) {
+            throw 'kubeseal extraction failed.'
+        }
+    } finally {
+        if (Test-Path -LiteralPath $kubesealArchive) {
+            Remove-Item -LiteralPath $kubesealArchive -Force
+        }
+    }
 }
 
 New-Item -ItemType Directory -Path $sshDir -Force | Out-Null
@@ -172,4 +206,4 @@ if ($distros -notcontains 'Ubuntu-24.04') {
 }
 
 Write-Host ''
-Write-Host 'Local credentials are prepared. Do not commit terraform.tfvars or platform/secrets/*.yaml.'
+Write-Host 'Local credentials are prepared. Plain secrets stay gitignored; only generated SealedSecret files are committed.'

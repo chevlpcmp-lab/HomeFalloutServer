@@ -1,0 +1,85 @@
+environment: prod
+
+repo:
+  url: git@github.com:chevlpcmp-lab/HomeFalloutServer.git
+  revision: main
+
+defaults:
+  project: infrastructure
+
+# Each component phase is derived from its tier: pre-resources (-1), chart (0),
+# then resources (+1). The spacing leaves room for waveOffset fine-tuning.
+tiers:
+  bootstrap: 0
+  network: 20
+  storage: 40
+  security: 60
+  apps: 80
+
+projects:
+  infrastructure:
+    description: Cluster-level services managed by this repository.
+    destinations: ["*"]
+    clusterResourceWhitelist:
+      - group: "*"
+        kind: "*"
+  applications:
+    description: Home media and photo applications.
+    destinations: [media, photos]
+    clusterResourceWhitelist:
+      - group: ""
+        kind: Namespace
+
+components:
+  - name: namespaces
+    tier: bootstrap
+    namespace: argocd
+    resources:
+      enabled: true
+
+  - name: metallb
+    tier: network
+    namespace: networking
+    chart:
+      repoURL: https://metallb.github.io/metallb
+      name: metallb
+      version: "0.15.3"
+    resources:
+      enabled: true
+
+  - name: storage
+    tier: storage
+    namespace: media
+    resources:
+      enabled: true
+
+  - name: sealed-secrets
+    tier: security
+    namespace: secrets
+    chart:
+      repoURL: https://bitnami.github.io/sealed-secrets
+      name: sealed-secrets
+      version: "2.19.1"
+
+  - name: media-stack
+    tier: apps
+    namespace: media
+    project: applications
+    resources:
+      enabled: true
+
+  - name: jellyfin
+    tier: apps
+    waveOffset: 2
+    namespace: media
+    project: applications
+    resources:
+      enabled: true
+
+  - name: immich
+    tier: apps
+    waveOffset: 4
+    namespace: photos
+    project: applications
+    resources:
+      enabled: true
