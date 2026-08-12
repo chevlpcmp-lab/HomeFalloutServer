@@ -34,6 +34,22 @@ function Wait-TcpPort {
     throw "Timed out waiting for ${ComputerName}:$Port"
 }
 
+function Wait-KubernetesResource {
+    param(
+        [Parameter(Mandatory = $true)][string]$Kubeconfig,
+        [Parameter(Mandatory = $true)][string]$Resource,
+        [int]$TimeoutSeconds = 300
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        & kubectl --kubeconfig $Kubeconfig get $Resource -o name 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) { return }
+        Start-Sleep -Seconds 5
+    }
+    throw "Timed out waiting for Kubernetes resource $Resource"
+}
+
 if (-not (Test-Path -LiteralPath $tfvars)) {
     throw 'Run scripts/prepare-workstation.ps1 first.'
 }
@@ -104,9 +120,16 @@ if (-not $SkipGitOps) {
         throw "Ansible did not produce $kubeconfig"
     }
     & (Join-Path $PSScriptRoot 'bootstrap.ps1') -Kubeconfig $kubeconfig
+    foreach ($namespace in @('media', 'photos', 'secrets')) {
+        Wait-KubernetesResource -Kubeconfig $kubeconfig -Resource "namespace/$namespace" -TimeoutSeconds 300
+    }
     kubectl --kubeconfig $kubeconfig wait --for=jsonpath='{.status.phase}'=Active namespace/media namespace/photos namespace/secrets --timeout=5m
+    if ($LASTEXITCODE -ne 0) { throw 'Application namespaces did not become active.' }
+    Wait-KubernetesResource -Kubeconfig $kubeconfig -Resource 'crd/sealedsecrets.bitnami.com' -TimeoutSeconds 300
     kubectl --kubeconfig $kubeconfig wait --for=condition=Established crd/sealedsecrets.bitnami.com --timeout=5m
+    if ($LASTEXITCODE -ne 0) { throw 'The Sealed Secrets CRD did not become established.' }
     kubectl --kubeconfig $kubeconfig rollout status deployment/sealed-secrets-controller -n secrets --timeout=5m
+    if ($LASTEXITCODE -ne 0) { throw 'The Sealed Secrets controller did not become ready.' }
 
     & (Join-Path $PSScriptRoot 'seal-secrets.ps1') -Kubeconfig $kubeconfig
     $sealedSecrets = @(
