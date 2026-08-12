@@ -18,8 +18,10 @@ Set the same paths in qBittorrent and the Arr applications:
 - Radarr root: `/data/library/movies`
 - Sonarr root: `/data/library/tv`
 
-qBittorrent's traffic already uses Gluetun's default route and kill switch. Binding qBittorrent to
-`tun0` in Advanced settings adds another guard. Confirm the VPN before adding downloads:
+qBittorrent's traffic uses Gluetun's default route and kill switch. Proton NAT-PMP port forwarding
+is enabled, and Gluetun automatically updates qBittorrent's listening port whenever Proton assigns
+or changes it. This relies on qBittorrent's **Bypass authentication for clients on localhost**
+option, which is enabled by default; leave that option on. Confirm the VPN before adding downloads:
 
 ```powershell
 kubectl --kubeconfig provisioning/ansible/kubeconfig exec -n media deploy/media-stack -c gluetun -- wget -qO- https://ipinfo.io

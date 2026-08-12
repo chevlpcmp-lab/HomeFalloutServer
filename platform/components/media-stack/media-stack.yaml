@@ -44,6 +44,24 @@ spec:
               value: America/Toronto
             - name: HTTP_CONTROL_SERVER_ADDRESS
               value: :8000
+            # Proton assigns a new incoming port when the tunnel reconnects. Gluetun
+            # obtains it through NAT-PMP and immediately tells qBittorrent to listen on
+            # that exact port. qBittorrent's localhost authentication bypass is used;
+            # the WebUI is not exposed through the forwarded VPN port.
+            - name: VPN_PORT_FORWARDING
+              value: "on"
+            - name: VPN_PORT_FORWARDING_PROVIDER
+              value: protonvpn
+            - name: VPN_PORT_FORWARDING_UP_COMMAND
+              value: >-
+                /bin/sh -c 'wget -O- -nv --retry-connrefused --post-data
+                "json={\"listen_port\":{{PORT}},\"current_network_interface\":\"{{VPN_INTERFACE}}\",\"random_port\":false,\"upnp\":false}"
+                http://127.0.0.1:8080/api/v2/app/setPreferences'
+            - name: VPN_PORT_FORWARDING_DOWN_COMMAND
+              value: >-
+                /bin/sh -c 'wget -O- -nv --retry-connrefused --post-data
+                "json={\"listen_port\":0,\"current_network_interface\":\"lo\"}"
+                http://127.0.0.1:8080/api/v2/app/setPreferences'
             - name: FIREWALL_INPUT_PORTS
               value: "5055,6246,6767,7575,7878,8000,8080,8191,8989,9696"
             # These private ranges bypass the VPN so LAN clients and Kubernetes probes
@@ -51,11 +69,11 @@ spec:
             - name: FIREWALL_OUTBOUND_SUBNETS
               value: "10.0.0.0/24,10.42.0.0/16,10.43.0.0/16"
           startupProbe:
-            httpGet: { path: /v1/publicip/ip, port: 8000 }
+            tcpSocket: { port: 8000 }
             periodSeconds: 5
             failureThreshold: 36
           readinessProbe:
-            httpGet: { path: /v1/publicip/ip, port: 8000 }
+            tcpSocket: { port: 8000 }
             periodSeconds: 15
             failureThreshold: 4
           resources:
