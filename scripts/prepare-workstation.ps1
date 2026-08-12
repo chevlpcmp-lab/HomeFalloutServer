@@ -14,8 +14,13 @@ $tfvarsPath = Join-Path $terraformDir 'terraform.tfvars'
 
 function New-RandomHex([int]$Bytes) {
     $buffer = [byte[]]::new($Bytes)
-    [System.Security.Cryptography.RandomNumberGenerator]::Fill($buffer)
-    return [Convert]::ToHexString($buffer).ToLowerInvariant()
+    $generator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $generator.GetBytes($buffer)
+    } finally {
+        $generator.Dispose()
+    }
+    return ([BitConverter]::ToString($buffer) -replace '-', '').ToLowerInvariant()
 }
 
 if (-not (Get-Command terraform -ErrorAction SilentlyContinue)) {
