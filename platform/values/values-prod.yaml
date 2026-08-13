@@ -37,6 +37,14 @@ components:
     resources:
       enabled: true
 
+  # LAN LoadBalancer address for the Argo CD UI (10.0.0.200).
+  - name: argocd
+    tier: network
+    waveOffset: 2
+    namespace: argocd
+    resources:
+      enabled: true
+
   - name: metallb
     tier: network
     namespace: networking
@@ -46,6 +54,16 @@ components:
       version: "0.15.3"
     resources:
       enabled: true
+
+  # Tailscale subnet router: advertises the LAN and cluster networks to the
+  # tailnet for remote access to everything (Argo CD, Proxmox, media apps).
+  # Staged but NOT deployed - follow docs/tailscale.md, then uncomment.
+  # - name: tailscale
+  #   tier: network
+  #   waveOffset: 4
+  #   namespace: networking
+  #   resources:
+  #     enabled: true
 
   - name: storage
     tier: storage

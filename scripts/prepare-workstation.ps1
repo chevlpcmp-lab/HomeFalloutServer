@@ -224,6 +224,26 @@ stringData:
     Write-Host "Created $mediaSecretPath (gitignored)."
 }
 
+$tailscaleSecretPath = Join-Path $secretsDir 'tailscale-secrets.yaml'
+if (-not (Test-Path -LiteralPath $tailscaleSecretPath)) {
+    $tailscaleSecret = @"
+# Paste a Tailscale auth key here before enabling the tailscale component.
+# Create it in the admin console (https://login.tailscale.com/admin/settings/keys):
+# reusable OFF, ephemeral OFF, pre-approved ON if your tailnet uses device approval.
+# The key is only used for the first login; identity then lives in the state PVC.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tailscale-auth
+  namespace: networking
+type: Opaque
+stringData:
+  TS_AUTHKEY: ""
+"@
+    Set-Content -LiteralPath $tailscaleSecretPath -Value $tailscaleSecret -Encoding UTF8
+    Write-Host "Created $tailscaleSecretPath (gitignored)."
+}
+
 $immichSecretPath = Join-Path $secretsDir 'immich-secrets.yaml'
 if (-not (Test-Path -LiteralPath $immichSecretPath)) {
     $dbPassword = New-RandomHex 32

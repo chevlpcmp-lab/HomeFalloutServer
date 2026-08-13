@@ -1,0 +1,16 @@
+# Dedicated LAN address for the Argo CD UI/API so it is manageable from any household
+# device (and over Tailscale once the subnet router is enabled) without port-forwarding.
+# A separate Service is used instead of patching argocd-server so the upstream install
+# manifests stay untouched.
+apiVersion: v1
+kind: Service
+metadata:
+  name: argocd
+  namespace: argocd
+  annotations: { metallb.io/loadBalancerIPs: "10.0.0.200" }
+spec:
+  type: LoadBalancer
+  selector: { app.kubernetes.io/name: argocd-server }
+  ports:
+    - { name: http, port: 80, targetPort: 8080 }
+    - { name: https, port: 443, targetPort: 8080 }

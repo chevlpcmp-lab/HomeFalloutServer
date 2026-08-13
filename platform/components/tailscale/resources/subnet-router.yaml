@@ -1,0 +1,70 @@
+# ── Tailscale subnet router ───────────────────────────────────────────────────
+# Advertises the home LAN and the cluster networks to the tailnet, so any device
+# logged into Tailscale can reach everything remotely: Argo CD (10.0.0.200), the
+# media apps (10.0.0.230-240), Proxmox, and any other LAN host - without opening
+# ports on the router.
+#
+# NOT deployed until the `tailscale` component is uncommented in
+# platform/values/values-prod.yaml. See docs/tailscale.md for the enable runbook.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tailscale-state
+  namespace: networking
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: config-local-retain
+  resources: { requests: { storage: 512Mi } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tailscale-subnet-router
+  namespace: networking
+  labels:
+    app: tailscale-subnet-router
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: tailscale-subnet-router }
+  template:
+    metadata:
+      labels: { app: tailscale-subnet-router }
+    spec:
+      containers:
+        - name: tailscale
+          image: tailscale/tailscale:v1.102.2
+          env:
+            # One-time key from the Tailscale admin console; only needed until the
+            # first login, after which identity lives in the state volume.
+            - name: TS_AUTHKEY
+              valueFrom:
+                secretKeyRef: { name: tailscale-auth, key: TS_AUTHKEY }
+            # Home LAN (Proxmox, MetalLB addresses, everything), then the cluster
+            # pod and service CIDRs so tailnet clients can also hit them directly.
+            - { name: TS_ROUTES, value: "10.0.0.0/24,10.42.0.0/16,10.43.0.0/16" }
+            # Also offer to route all internet traffic (exit node); needs its own
+            # approval in the admin console and is optional to use.
+            - { name: TS_EXTRA_ARGS, value: "--advertise-exit-node" }
+            - { name: TS_HOSTNAME, value: homefallout }
+            - { name: TS_STATE_DIR, value: /var/lib/tailscale }
+            # File state on the PVC instead of a kube Secret, and kernel (not
+            # userspace) networking for subnet-routing throughput.
+            - { name: TS_KUBE_SECRET, value: "" }
+            - { name: TS_USERSPACE, value: "false" }
+            - { name: TS_AUTH_ONCE, value: "true" }
+            - { name: TS_ACCEPT_DNS, value: "false" }
+          securityContext:
+            capabilities:
+              add: [NET_ADMIN]
+          volumeMounts:
+            - { name: state, mountPath: /var/lib/tailscale }
+            - { name: tun, mountPath: /dev/net/tun }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 500m, memory: 256Mi }
+      volumes:
+        - { name: state, persistentVolumeClaim: { claimName: tailscale-state } }
+        - name: tun
+          hostPath: { path: /dev/net/tun, type: CharDevice }
