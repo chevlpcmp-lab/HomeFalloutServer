@@ -472,8 +472,14 @@ data:
 
         # Refresh the Jellyfin library list and enable movie/TV libraries. This is
         # safe to re-run and picks up libraries added later.
-        libraries = json_request("GET",
-            f"{SEERR_URL}/api/v1/settings/jellyfin/library?sync=true", opener=opener)
+        try:
+            libraries = json_request("GET",
+                f"{SEERR_URL}/api/v1/settings/jellyfin/library?sync=true", opener=opener)
+        except urllib.error.HTTPError as e:
+            if e.code != 404:
+                raise
+            libraries = []
+            print("Seerr: Jellyfin returned no libraries yet; Arr setup will still continue", flush=True)
         enabled_ids = [str(lib["id"]) for lib in libraries
             if lib.get("type") in ("movie", "show") or lib.get("enabled")]
         if enabled_ids:
@@ -612,6 +618,33 @@ data:
         print("Maintainerr: setup and all configured connections verified", flush=True)
 
     # ── Jellyfin ──────────────────────────────────────────────────────────────
+
+    def configure_jellyfin_libraries():
+        if not JELLYFIN_API_KEY:
+            print("Jellyfin: library setup skipped (JELLYFIN_API_KEY not set)", flush=True)
+            return
+        headers = {"X-Emby-Token": JELLYFIN_API_KEY}
+        base = SVC["jellyfin"]
+        folders = json_request("GET", f"{base}/Library/VirtualFolders", headers=headers)
+        wanted = [
+            ("Movies", "movies", "/media/library/movies"),
+            ("TV Shows", "tvshows", "/media/library/tv"),
+        ]
+        for name, collection_type, path in wanted:
+            existing = next((folder for folder in folders
+                if folder.get("CollectionType") == collection_type
+                or path in (folder.get("Locations") or [])), None)
+            if existing:
+                print(f"Jellyfin: {name} library already configured", flush=True)
+                continue
+            query = urllib.parse.urlencode({
+                "name": name,
+                "collectionType": collection_type,
+                "paths": path,
+                "refreshLibrary": "true",
+            })
+            json_request("POST", f"{base}/Library/VirtualFolders?{query}", {}, headers=headers)
+            print(f"Jellyfin: {name} library added at {path}", flush=True)
 
     def sync_jellyfin_admin():
         # Ensure the shared admin account exists in Jellyfin with the shared
@@ -828,6 +861,8 @@ data:
             print(f"Jellyfin: admin sync failed ({type(e).__name__}: {e}) - configure manually if needed", flush=True)
     else:
         print("Jellyfin: admin sync skipped (needs apps-admin secret and JELLYFIN_API_KEY)", flush=True)
+
+    configure_jellyfin_libraries()
 
     # Seerr's own API key cannot administer its settings. Log in with the shared
     # Jellyfin admin to complete first-run setup and reconcile its Arr instances.

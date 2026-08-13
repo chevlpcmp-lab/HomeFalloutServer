@@ -77,6 +77,7 @@ The bootstrap helper continuously and idempotently configures:
 - FlareSolverr as Prowlarr's proxy.
 - Radarr and Sonarr connections in Bazarr.
 - Jellyfin library-update notifications in Radarr and Sonarr.
+- Jellyfin Movies and TV Shows libraries backed by the shared read-only media mount.
 - Seerr's Jellyfin admin, enabled libraries, and default Radarr/Sonarr instances.
 - Maintainerr's Jellyfin, Radarr, Sonarr, Seerr, and qBittorrent connections.
 - Homarr tiles, integrations, board, and widgets once its API key exists.

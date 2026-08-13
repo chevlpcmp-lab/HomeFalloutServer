@@ -13,6 +13,7 @@ every pod restart. It configures:
 | Bazarr | Radarr | `http://localhost:7878` |
 | Bazarr | Sonarr | `http://localhost:8989` |
 | Radarr / Sonarr | Jellyfin | Emby/Jellyfin library-update notification over Service DNS |
+| Bootstrap | Jellyfin | Movies and TV Shows libraries from `/media/library/movies` and `/media/library/tv` |
 | Seerr | Jellyfin, Radarr, Sonarr | first-run admin, libraries, profiles, and default instances |
 | Maintainerr | Jellyfin, Radarr, Sonarr, Seerr, qBittorrent | cleanup-engine service configuration |
 | Homarr | everything | Service DNS, for example `http://radarr.media.svc.cluster.local` |
