@@ -110,7 +110,10 @@ kubectl --kubeconfig provisioning/ansible/kubeconfig rollout restart -n media de
 The board is only laid out when the bootstrap creates it: rearranging tiles afterwards is
 safe, and deleting the `media` board makes the next restart rebuild it. After Jellyfin's API key is
 available, the bootstrap completes Seerr's first-run Jellyfin login, enables its movie/TV
-libraries, creates its default Arr services, and configures Maintainerr through its API.
+libraries, creates its default Arr services, and configures Maintainerr through its API. It also
+reconciles the storage-aware Maintainerr retention rules documented in
+[Storage](storage.md#automatic-media-retention). Use a Jellyfin favorite, an Arr `keep` tag, or a
+Maintainerr collection exclusion to protect an item from automated deletion.
 
 qBittorrent's traffic uses Gluetun's default route and kill switch. Proton NAT-PMP port forwarding
 is enabled, and Gluetun automatically updates qBittorrent's listening port whenever Proton assigns

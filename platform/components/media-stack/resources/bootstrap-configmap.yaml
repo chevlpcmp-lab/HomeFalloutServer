@@ -734,6 +734,193 @@ data:
             raise RuntimeError("Maintainerr still reports an incomplete setup")
         print("Maintainerr: setup and all configured connections verified", flush=True)
 
+        # Keep the retention policy in Git alongside the rest of the stack.  A
+        # Jellyfin favorite or an Arr tag named `keep` is an explicit veto in
+        # every destructive rule.  Collections provide a visible grace period
+        # so a candidate can be excluded before Maintainerr removes it.
+        libraries = mt("GET", "/api/media-server/libraries")
+        movie_library = next((item for item in libraries if item.get("type") == "movie"), None)
+        show_library = next((item for item in libraries if item.get("type") == "show"), None)
+        radarr_servers = mt("GET", "/api/settings/radarr")
+        sonarr_servers = mt("GET", "/api/settings/sonarr")
+        radarr_server = next((item for item in radarr_servers if item.get("serverName") == "Radarr"), None)
+        sonarr_server = next((item for item in sonarr_servers if item.get("serverName") == "Sonarr"), None)
+
+        if not movie_library or not show_library or not radarr_server or not sonarr_server:
+            raise RuntimeError("Maintainerr retention rules need both libraries and both Arr servers")
+
+        # Maintainerr rule constants.  Keeping these names here makes the JSON
+        # below readable while preserving the API's numeric wire format.
+        AND = 0
+        BIGGER, SMALLER, EQUALS = 0, 1, 2
+        BEFORE, NOT_CONTAINS = 5, 9
+        COUNT_EQUALS, COUNT_BIGGER = 14, 16
+        NUMBER, TEXT, BOOLEAN = 0, 2, 3
+        RADARR, SONARR, JELLYFIN = 1, 2, 6
+
+        def days(value):
+            return str(value * 86400)
+
+        def rule(app, prop, action, value, value_type=NUMBER, first=False,
+                 arr_disk_path=None):
+            item = {
+                "operator": None if first else AND,
+                "action": action,
+                "firstVal": [app, prop],
+                "customVal": {"ruleTypeId": value_type, "value": str(value)},
+                "section": 0,
+            }
+            if arr_disk_path:
+                item["arrDiskPath"] = arr_disk_path
+            return item
+
+        def movie_guards(items):
+            return items + [
+                # No Jellyfin user has marked it as a favorite.
+                rule(JELLYFIN, 39, COUNT_EQUALS, 0),
+                # `keep` is the human-controlled escape hatch in Radarr.
+                rule(RADARR, 2, NOT_CONTAINS, "keep", TEXT),
+            ]
+
+        def show_guards(items):
+            return items + [
+                rule(JELLYFIN, 40, COUNT_EQUALS, 0),
+                rule(SONARR, 2, NOT_CONTAINS, "keep", TEXT),
+            ]
+
+        def policy(key, name, description, library, data_type, rules,
+                   delete_after_days, sort_title, arr_kind):
+            marker = f"[homefallout:{key}]"
+            payload = {
+                "libraryId": library["id"],
+                "name": name,
+                "description": f"{description} {marker}",
+                "isActive": True,
+                "arrAction": 0,  # delete through Radarr/Sonarr
+                "useRules": True,
+                "listExclusions": True,
+                "cleanupLeftoverFolders": True,
+                "forceSeerr": True,
+                "rules": rules,
+                "dataType": data_type,
+                "tagInArr": False,
+                "collection": {
+                    "visibleOnHome": True,
+                    "visibleOnRecommended": False,
+                    "deleteAfterDays": delete_after_days,
+                    "keepLogsForMonths": 6,
+                    "sortTitle": sort_title,
+                },
+            }
+            if arr_kind == "radarr":
+                payload["radarrSettingsId"] = radarr_server["id"]
+            else:
+                payload["sonarrSettingsId"] = sonarr_server["id"]
+            return marker, payload
+
+        policies = [
+            policy(
+                "credits-rolled-v1",
+                "[POPCORN] Credits Rolled - 30d cooldown",
+                "Watched movies cool down for 30 days, then spend 7 days in Leaving Soon.",
+                movie_library,
+                "movie",
+                movie_guards([
+                    rule(JELLYFIN, 5, BIGGER, 0, first=True),       # view count
+                    rule(JELLYFIN, 7, BEFORE, days(30)),            # last viewed
+                    rule(JELLYFIN, 0, BEFORE, days(14)),            # newly-added guard
+                ]),
+                7,
+                "Leaving Soon - Watched Movies",
+                "radarr",
+            ),
+            policy(
+                "shelf-warmers-v1",
+                "[COBWEBS] Shelf Warmers - 120d unwatched",
+                "Unwatched movies get a four-month chance and a 14-day Leaving Soon review.",
+                movie_library,
+                "movie",
+                movie_guards([
+                    rule(JELLYFIN, 5, EQUALS, 0, first=True),
+                    rule(JELLYFIN, 0, BEFORE, days(120)),
+                ]),
+                14,
+                "Leaving Soon - Shelf Warmers",
+                "radarr",
+            ),
+            policy(
+                "series-finale-v1",
+                "[VICTORY LAP] Finished Series - 30d encore",
+                "Ended and fully watched shows get a 30-day encore plus a 14-day review.",
+                show_library,
+                "show",
+                show_guards([
+                    rule(SONARR, 7, EQUALS, 1, BOOLEAN, first=True), # ended
+                    rule(JELLYFIN, 12, COUNT_BIGGER, 0),             # fully seen by someone
+                    rule(JELLYFIN, 13, BEFORE, days(30)),            # last watched
+                    rule(SONARR, 0, BEFORE, days(30)),               # newly-added guard
+                ]),
+                14,
+                "Leaving Soon - Finished Series",
+                "sonarr",
+            ),
+            policy(
+                "movie-pressure-v1",
+                "[SOS] Movie Pressure Valve - under 80 GiB",
+                "Only when free media space drops below 80 GiB: queue large, old movies for a 3-day review.",
+                movie_library,
+                "movie",
+                movie_guards([
+                    rule(RADARR, 23, SMALLER, 80, first=True,
+                         arr_disk_path="/data/library/movies"),
+                    rule(RADARR, 7, BIGGER, 8192),                  # file size in MiB
+                    rule(JELLYFIN, 0, BEFORE, days(30)),
+                ]),
+                3,
+                "SOS - Large Movies",
+                "radarr",
+            ),
+            policy(
+                "show-pressure-v1",
+                "[SOS] TV Pressure Valve - under 80 GiB",
+                "Only when free media space drops below 80 GiB: queue large, old shows for a 3-day review.",
+                show_library,
+                "show",
+                show_guards([
+                    rule(SONARR, 28, SMALLER, 80, first=True,
+                         arr_disk_path="/data/library/tv"),
+                    rule(SONARR, 1, BIGGER, 20480),                 # entire show in MiB
+                    rule(SONARR, 0, BEFORE, days(30)),
+                ]),
+                3,
+                "SOS - Large TV Shows",
+                "sonarr",
+            ),
+        ]
+
+        existing_groups = mt("GET", "/api/rules")
+        for marker, payload in policies:
+            current = next((group for group in existing_groups
+                if group.get("name") == payload["name"]
+                or marker in (group.get("description") or "")), None)
+            # Migrate the one pre-bootstrap test rule without leaving a duplicate.
+            if current is None and marker == "[homefallout:credits-rolled-v1]":
+                current = next((group for group in existing_groups
+                    if "Credits Rolled" in group.get("name", "")), None)
+            if current:
+                payload["id"] = current["id"]
+                result = mt("PUT", "/api/rules", payload)
+                action = "updated"
+            else:
+                result = mt("POST", "/api/rules", payload)
+                action = "created"
+            if result.get("code") != 1:
+                raise RuntimeError(
+                    f"Maintainerr rule '{payload['name']}' failed: "
+                    f"{result.get('message', 'unknown error')}"
+                )
+            print(f"Maintainerr: retention rule '{payload['name']}' {action}", flush=True)
+
     # ── Jellyfin ──────────────────────────────────────────────────────────────
 
     def configure_jellyfin_libraries():

@@ -136,3 +136,26 @@ loss.
 Until an HDD is added, expect roughly 450-520 GB of practical media/photo capacity after download
 staging and safety headroom. Configure qBittorrent to remove completed downloads after import and
 use Maintainerr to cap library growth.
+
+## Automatic media retention
+
+The media bootstrap owns five Maintainerr rules designed for the current single-NVMe host. Rule
+candidates appear in Jellyfin **Leaving Soon** collections before deletion, and Maintainerr keeps
+six months of decision logs.
+
+| Rule | Candidate | Review window |
+|---|---|---:|
+| Credits Rolled | Movie watched, last viewed over 30 days ago, and at least 14 days old | 7 days |
+| Shelf Warmers | Movie still unwatched after 120 days | 14 days |
+| Finished Series | Ended show fully watched by someone and untouched for 30 days | 14 days |
+| Movie Pressure Valve | Under 80 GiB free, movie over 8 GiB, and over 30 days old | 3 days |
+| TV Pressure Valve | Under 80 GiB free, show over 20 GiB, and over 30 days old | 3 days |
+
+All five rules exclude media favorited by any Jellyfin user and media tagged `keep` in Radarr or
+Sonarr. Maintainerr collection exclusions provide a third per-item escape hatch. The pressure
+rules are inert while free space is healthy; the 80 GiB threshold preserves roughly 13% of the
+media disk for imports, temporary files, and filesystem headroom.
+
+The policies are reconciled on every media-stack bootstrap from
+`platform/components/media-stack/resources/bootstrap-configmap.yaml`. Edit the thresholds there,
+not only in the Maintainerr UI, or the next pod restart will restore the Git-owned values.

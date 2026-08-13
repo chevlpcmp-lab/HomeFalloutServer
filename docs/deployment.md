@@ -169,7 +169,7 @@ Finally, prove qBittorrent shares Gluetun's VPN address using the commands in
 2. Complete Jellyfin's wizard, add movie/TV libraries from `/media/library`, and create an API key.
 3. Put both API keys in the gitignored media secret source, reseal, commit, and restart the media
    stack bootstrap.
-4. Complete Seerr and Maintainerr's interactive wizards.
+4. Confirm Seerr and Maintainerr show their bootstrap-managed connections and retention rules.
 5. Create the first Immich administrator and test an upload.
 
 See [First-run application wiring](configuration.md) for exact paths and commands.
