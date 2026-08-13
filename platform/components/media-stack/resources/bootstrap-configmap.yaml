@@ -454,9 +454,13 @@ data:
                 }),
             })
             if current:
-                put(f"{PROWLARR_URL}/api/v1/indexer/{current['id']}", prowlarr_key, payload)
+                # Public trackers can be temporarily unavailable or challenge
+                # Prowlarr during reconciliation. forceSave still validates the
+                # schema without turning transient reachability into config drift.
+                put(f"{PROWLARR_URL}/api/v1/indexer/{current['id']}?forceSave=true",
+                    prowlarr_key, payload)
             else:
-                post(f"{PROWLARR_URL}/api/v1/indexer", prowlarr_key, payload)
+                post(f"{PROWLARR_URL}/api/v1/indexer?forceSave=true", prowlarr_key, payload)
             print(f"Prowlarr: indexer '{name}' {'updated' if current else 'added'}", flush=True)
 
     def configure_ultra_hd_profile(base_url, api_key, app):
