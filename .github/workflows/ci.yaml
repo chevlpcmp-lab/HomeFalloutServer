@@ -1,0 +1,99 @@
+name: Validate Manifests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    name: kubeconform + YAML lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kubeconform
+        run: |
+          curl -fsSL \
+            -o /tmp/kubeconform.tar.gz \
+            https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          echo "95f14e87aa28c09d5941f11bd024c1d02fdc0303ccaa23f61cef67bc92619d73  /tmp/kubeconform.tar.gz" \
+            | sha256sum -c -
+          tar xzf /tmp/kubeconform.tar.gz -C /tmp
+          sudo mv /tmp/kubeconform /usr/local/bin/
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.20.2
+
+      - name: Install Python validators
+        run: pip install yamllint pyyaml
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      - name: Lint YAML syntax
+        # platform/templates is the Helm chart, not YAML documents, so a linter
+        # reading `{{- range }}` as a document is noise rather than signal.
+        run: |
+          yamllint -d '{extends: relaxed, rules: {line-length: {max: 200}}}' \
+            bootstrap/ platform/values/ platform/components/
+
+      - name: Render the platform chart and check every component resolves
+        # Catches a values entry pointing at a directory that does not exist, a
+        # chart component missing its chart-prod values file, and template errors.
+        run: ./scripts/validate-platform.sh
+
+      - name: Syntax-check the Python embedded in ConfigMaps
+        # The media-stack bootstrap is a Python script inside a ConfigMap block
+        # scalar; a syntax or indentation slip otherwise only fails at pod start.
+        run: python3 scripts/validate-bootstrap.py
+
+      - name: Validate Kubernetes manifests
+        # `values` directories are Helm inputs, not Kubernetes objects, so they
+        # have no `kind` and kubeconform would count each as an error.
+        run: |
+          helm template platform platform -f platform/values/values-prod.yaml > /tmp/apps.yaml
+          kubeconform \
+            -strict \
+            -ignore-missing-schemas \
+            -summary \
+            -skip "SealedSecret,Application,AppProject,IPAddressPool,L2Advertisement" \
+            -kubernetes-version 1.34.0 \
+            /tmp/apps.yaml bootstrap/ \
+            $(find platform/components -path '*/values' -prune -o -name '*.yaml' -print)
+
+      - name: Validate Terraform
+        run: |
+          terraform -chdir=provisioning/terraform init -backend=false -input=false
+          terraform -chdir=provisioning/terraform validate
+          terraform -chdir=provisioning/terraform fmt -check -recursive
+
+  gitleaks:
+    name: gitleaks secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: a secret committed and later deleted still leaks.
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        run: |
+          curl -fsSL \
+            -o /tmp/gitleaks.tar.gz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  /tmp/gitleaks.tar.gz" \
+            | sha256sum -c -
+          tar xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          sudo mv /tmp/gitleaks /usr/local/bin/
+
+      - name: Scan repository history for secrets
+        # Uses .gitleaks.toml: sealed ciphertext fields are allowlisted per file
+        # and per key, so plaintext in the same manifests still gets caught.
+        run: gitleaks git --redact --no-banner
