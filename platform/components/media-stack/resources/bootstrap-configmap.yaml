@@ -32,6 +32,9 @@ data:
 
     HOMARR_URL       = os.environ.get("HOMARR_URL", "http://homarr.media.svc.cluster.local")
     HOMARR_API_KEY   = os.environ.get("HOMARR_API_KEY", "")
+    # A restored installation can use its sealed API key. On a brand-new
+    # Jellyfin database the key does not exist yet, so the bootstrap completes
+    # first-run setup from apps-admin and uses an authenticated device token.
     JELLYFIN_API_KEY = os.environ.get("JELLYFIN_API_KEY", "")
     # One shared admin account (apps-admin secret) enforced across every app that
     # supports it: qBittorrent, Radarr, Sonarr, Prowlarr, Bazarr, and Jellyfin.
@@ -178,6 +181,74 @@ data:
             time.sleep(5)
         raise RuntimeError(f"{name} not ready after 10 minutes")
 
+    def ensure_jellyfin_access():
+        """Make a restored or brand-new Jellyfin installation API-ready."""
+        global JELLYFIN_API_KEY
+        base = SVC["jellyfin"]
+
+        print("Waiting for Jellyfin...", flush=True)
+        public_info = None
+        for _ in range(120):
+            try:
+                public_info = json_request("GET", f"{base}/System/Info/Public", timeout=5)
+                break
+            except Exception:
+                time.sleep(5)
+        if not public_info:
+            raise RuntimeError("Jellyfin not ready after 10 minutes")
+        print("Jellyfin ready", flush=True)
+
+        if not public_info.get("StartupWizardCompleted", False):
+            if not (ADMIN_USER and ADMIN_PASS):
+                raise RuntimeError("Fresh Jellyfin setup needs the apps-admin secret")
+            json_request("POST", f"{base}/Startup/Configuration", {
+                "ServerName": "FalloutServer",
+                "UICulture": "en-US",
+                "MetadataCountryCode": "CA",
+                "PreferredMetadataLanguage": "en",
+            })
+            json_request("POST", f"{base}/Startup/User", {
+                "Name": ADMIN_USER,
+                "Password": ADMIN_PASS,
+            })
+            # Jellyfin remains LAN-only at the Kubernetes Service/MetalLB layer;
+            # UPnP is not requested and no router port is opened by this stack.
+            json_request("POST", f"{base}/Startup/RemoteAccess", {
+                "EnableRemoteAccess": True,
+            })
+            json_request("POST", f"{base}/Startup/Complete", {})
+            print("Jellyfin: first-run setup completed from Git-owned policy", flush=True)
+
+        def token_works(token):
+            if not token:
+                return False
+            try:
+                json_request("GET", f"{base}/System/Info",
+                    headers={"X-Emby-Token": token}, timeout=10)
+                return True
+            except Exception:
+                return False
+
+        if token_works(JELLYFIN_API_KEY):
+            print("Jellyfin: sealed API key verified", flush=True)
+            return
+        if not (ADMIN_USER and ADMIN_PASS):
+            raise RuntimeError("Jellyfin API key is invalid and apps-admin credentials are unavailable")
+
+        auth = json_request("POST", f"{base}/Users/AuthenticateByName", {
+            "Username": ADMIN_USER,
+            "Pw": ADMIN_PASS,
+        }, headers={
+            "Authorization": (
+                'MediaBrowser Client="HomeFallout Bootstrap", '
+                'Device="Kubernetes", DeviceId="homefallout-bootstrap", Version="1.0"'
+            ),
+        })
+        JELLYFIN_API_KEY = auth.get("AccessToken", "")
+        if not token_works(JELLYFIN_API_KEY):
+            raise RuntimeError("Jellyfin login succeeded without a usable access token")
+        print("Jellyfin: authenticated from the sealed apps-admin credentials", flush=True)
+
     # ── qBittorrent (localhost auth bypass, no credentials needed) ────────────
 
     def configure_qbittorrent():
@@ -320,6 +391,107 @@ data:
         else:
             post(f"{PROWLARR_URL}/api/v1/indexerproxy", prowlarr_key, payload)
         print(f"Prowlarr: FlareSolverr proxy {'updated' if existing else 'added'}", flush=True)
+
+    def configure_prowlarr_indexers(prowlarr_key):
+        """Recreate the credential-free public indexer baseline from Git."""
+        tags = get(f"{PROWLARR_URL}/api/v1/tag", prowlarr_key)
+        flared = next((tag for tag in tags if tag.get("label") == "flared"), None)
+        if flared is None:
+            flared = post(f"{PROWLARR_URL}/api/v1/tag", prowlarr_key, {"label": "flared"})
+
+        wanted = [
+            ("EZTV", "eztv", 5, {"baseSettings.limitsUnit": 0}, [flared["id"]]),
+            ("LimeTorrents", "limetorrents", 1, {
+                "baseSettings.limitsUnit": 0,
+                "downloadlink": 1,
+                "downloadlink2": 0,
+                "sort": 0,
+            }, []),
+            ("Nyaa.si", "nyaasi", 5, {
+                "baseSettings.limitsUnit": 0,
+                "prefer_magnet_links": True,
+                "sonarr_compatibility": False,
+                "strip_s01": False,
+                "radarr_compatibility": False,
+                "filter-id": 0,
+                "cat-id": 0,
+                "sort": 0,
+                "type": 1,
+            }, []),
+            ("YTS", "yts", 2, {
+                "baseSettings.limitsUnit": 0,
+                "apiurl": "movies-api.accel.li",
+            }, []),
+        ]
+        existing_indexers = get(f"{PROWLARR_URL}/api/v1/indexer", prowlarr_key)
+        schemas = get(f"{PROWLARR_URL}/api/v1/indexer/schema", prowlarr_key)
+
+        def schema_for(definition):
+            return next(schema for schema in schemas if any(
+                field.get("name") == "definitionFile" and field.get("value") == definition
+                for field in schema.get("fields", [])
+            ))
+
+        for name, definition, priority, field_values, tag_ids in wanted:
+            current = next((item for item in existing_indexers
+                if item.get("name") == name or any(
+                    field.get("name") == "definitionFile" and field.get("value") == definition
+                    for field in item.get("fields", [])
+                )), None)
+            payload = dict(current or schema_for(definition))
+            payload.update({
+                "name": name,
+                "enable": True,
+                "redirect": False,
+                "priority": priority,
+                "downloadClientId": 0,
+                "implementation": "Cardigann",
+                "configContract": "CardigannSettings",
+                "tags": tag_ids,
+                "fields": set_fields(payload.get("fields", []), {
+                    "definitionFile": definition,
+                    **field_values,
+                }),
+            })
+            if current:
+                put(f"{PROWLARR_URL}/api/v1/indexer/{current['id']}", prowlarr_key, payload)
+            else:
+                post(f"{PROWLARR_URL}/api/v1/indexer", prowlarr_key, payload)
+            print(f"Prowlarr: indexer '{name}' {'updated' if current else 'added'}", flush=True)
+
+    def configure_ultra_hd_profile(base_url, api_key, app):
+        """Keep the optional WEB/Bluray 2160p profile reproducible."""
+        profiles = get(f"{base_url}/api/v3/qualityprofile", api_key)
+        current = next((profile for profile in profiles if profile.get("name") == "Ultra-HD"), None)
+        template = dict(current or profiles[0])
+
+        def set_allowed(items, parent_is_web_2160=False):
+            for item in items:
+                is_web_2160 = item.get("name") == "WEB 2160p"
+                quality = item.get("quality") or {}
+                item["allowed"] = bool(
+                    parent_is_web_2160 or is_web_2160
+                    or quality.get("name") == "Bluray-2160p"
+                )
+                set_allowed(item.get("items") or [], parent_is_web_2160 or is_web_2160)
+
+        set_allowed(template["items"])
+        web_2160 = next(item for item in template["items"] if item.get("name") == "WEB 2160p")
+        template.update({
+            "name": "Ultra-HD",
+            "upgradeAllowed": True,
+            "cutoff": web_2160["id"],
+            "minFormatScore": 0,
+            "cutoffFormatScore": 0,
+            "minUpgradeFormatScore": 1,
+            "formatItems": [],
+        })
+        if current:
+            put(f"{base_url}/api/v3/qualityprofile/{current['id']}", api_key, template)
+        else:
+            template.pop("id", None)
+            post(f"{base_url}/api/v3/qualityprofile", api_key, template)
+        print(f"{app}: Ultra-HD quality profile {'updated' if current else 'added'}", flush=True)
 
     def add_prowlarr_app(prowlarr_key, app_name, app_url, app_key):
         apps = get(f"{PROWLARR_URL}/api/v1/applications", prowlarr_key)
@@ -1135,6 +1307,8 @@ data:
         "seerr":    read_seerr_key("/config/seerr/settings.json"),
     }
 
+    ensure_jellyfin_access()
+
     wait_ready(RADARR_URL,   keys["radarr"],   "Radarr")
     wait_ready(SONARR_URL,   keys["sonarr"],   "Sonarr")
     wait_ready(PROWLARR_URL, keys["prowlarr"], "Prowlarr", "v1")
@@ -1143,11 +1317,14 @@ data:
     configure_arr_auth(RADARR_URL,   keys["radarr"],   "Radarr")
     configure_arr_auth(SONARR_URL,   keys["sonarr"],   "Sonarr")
     configure_arr_auth(PROWLARR_URL, keys["prowlarr"], "Prowlarr", "v1")
+    configure_ultra_hd_profile(RADARR_URL, keys["radarr"], "Radarr")
+    configure_ultra_hd_profile(SONARR_URL, keys["sonarr"], "Sonarr")
     add_root_folder(RADARR_URL, keys["radarr"], "Radarr", "/data/library/movies")
     add_root_folder(SONARR_URL, keys["sonarr"], "Sonarr", "/data/library/tv")
     add_qbittorrent_client(RADARR_URL, keys["radarr"], "Radarr")
     add_qbittorrent_client(SONARR_URL, keys["sonarr"], "Sonarr")
     add_flaresolverr(keys["prowlarr"])
+    configure_prowlarr_indexers(keys["prowlarr"])
     add_prowlarr_app(keys["prowlarr"], "Radarr", RADARR_URL, keys["radarr"])
     add_prowlarr_app(keys["prowlarr"], "Sonarr", SONARR_URL, keys["sonarr"])
     add_jellyfin_notification(RADARR_URL, keys["radarr"], "Radarr")
@@ -1191,5 +1368,3 @@ data:
         print("Homarr: add it to platform/secrets/media-secrets.yaml, reseal, and restart this pod.", flush=True)
 
     print("Bootstrap complete!", flush=True)
-    while True:
-        time.sleep(86400)

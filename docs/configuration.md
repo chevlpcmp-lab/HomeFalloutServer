@@ -3,7 +3,8 @@
 A `bootstrap` sidecar in the media-stack pod (`bootstrap-configmap.yaml`) wires the
 applications together automatically. It reads each app's API key straight from its config
 volume, waits for the APIs to come up, and idempotently re-asserts the configuration on
-every pod restart. It configures:
+every pod restart. The sidecar also watches the ConfigMap digest, so an Argo-applied change to the
+Git-owned bootstrap is loaded automatically without a manual rollout. It configures:
 
 | From | To | URL |
 | --- | --- | --- |
@@ -26,6 +27,30 @@ It also creates the shared paths and sets them in qBittorrent and the Arr applic
 - Radarr root: `/data/library/movies`
 - Sonarr root: `/data/library/tv`
 
+## Git-owned application desired state
+
+The reproducible application configuration lives in
+`platform/components/media-stack/resources/bootstrap-configmap.yaml`; the Kubernetes workload that
+executes and watches it lives beside that file in `media-stack.yaml`. Together they own the shared
+login, download paths and categories, Arr roots and clients, Prowlarr applications and proxy,
+credential-free indexers, the optional Arr `Ultra-HD` profiles, Jellyfin libraries and refresh
+notifications, Bazarr policy, Seerr services, Maintainerr rules, and Homarr's initial dashboard
+layout.
+
+Do not commit raw `/config` directories, SQLite databases, or API responses. They contain generated
+credentials, history, and mutable state. On a blank installation, the applications generate their
+local databases and API keys, then the bootstrap discovers those keys and rebuilds the Git-owned
+wiring. To force and verify the same reconciliation at any time:
+
+```powershell
+.\scripts\reconcile-media-config.ps1
+```
+
+Git recreates desired settings; backups recreate personal state. Jellyfin watch history, Homarr
+layout changes made after bootstrap, Seerr requests, application history, Immich's database, photos,
+and downloaded media still require the off-host backup set described in
+[Operations](operations.md#recovery-order-after-a-total-rebuild).
+
 ## One shared admin account
 
 The `apps-admin` secret (`platform/secrets/media-secrets.yaml`) is the single source of
@@ -36,7 +61,7 @@ truth for the admin login, and the bootstrap enforces it on every pod restart:
 | qBittorrent | WebUI credentials synced |
 | Radarr / Sonarr / Prowlarr | forms login enforced with the shared credentials |
 | Bazarr | form login enforced with the shared credentials |
-| Jellyfin | shared admin user created/password-synced (needs `JELLYFIN_API_KEY`) |
+| Jellyfin | fresh-install wizard, shared admin user, and password handled automatically |
 | Seerr | signs in with Jellyfin, so the shared credentials work automatically |
 | Maintainerr | has no login system |
 | Homarr | set the admin password to match once by hand (its API cannot reset the account that owns the API key) |
@@ -62,7 +87,7 @@ Jellyfin refreshes after imports and renames.
 | Radarr / Sonarr **Settings > Indexers** | Indexers synchronized from Prowlarr |
 | Radarr / Sonarr **Settings > Connect** | `Jellyfin` library-update connection |
 | Prowlarr **Settings > Apps** | `Radarr` and `Sonarr`, both set to Full Sync |
-| Prowlarr **Settings > Indexers** | Your chosen external indexer providers |
+| Prowlarr **Settings > Indexers** | EZTV, LimeTorrents, Nyaa.si, and YTS |
 | Prowlarr **Settings > Indexers > Proxies** | `FlareSolverr` |
 | Seerr **Settings > Services** | Default Radarr and Sonarr instances |
 | Maintainerr **Settings** | Jellyfin, Radarr, Sonarr, Seerr, and qBittorrent |
@@ -79,33 +104,36 @@ Sous-Titres.eu improves French coverage, and SubF2M is the general fallback. An 
 SubDL account can be added later for broader coverage, but neither credential is required for the
 deployed baseline.
 
-Prowlarr cannot infer which external indexer provider you are authorized to use or invent its
-credentials. Add each chosen provider once in Prowlarr. Because the Applications are reconciled to
-Full Sync, Prowlarr publishes those indexers to Radarr and Sonarr automatically. FlareSolverr is a
-proxy used by compatible indexers; creating it does not create an indexer by itself.
+The Git-owned baseline uses four public, credential-free indexers: EZTV and Nyaa.si for TV coverage,
+YTS for compact movies, and LimeTorrents as a broad fallback. Because the Applications are
+reconciled to Full Sync, Prowlarr publishes them to Radarr and Sonarr automatically. FlareSolverr is
+available to compatible indexers. Private trackers and providers requiring accounts remain an
+intentional manual extension unless their credentials are added through a SealedSecret and their
+non-secret schema is added to the bootstrap.
 
 ## Homarr dashboard provisioning
 
 The bootstrap also fills Homarr with app tiles (with LAN links and ping URLs),
 integrations for Radarr, Sonarr, Prowlarr, Bazarr, Seerr, qBittorrent, and Jellyfin, and a
 `media` board pre-populated with those tiles plus calendar, downloads, media-server, and
-request widgets. Two secrets gate it, and until they are filled the bootstrap simply skips
-the corresponding pieces:
+request widgets. Homarr's own API key gates this provisioning:
 
 1. Open Homarr at `http://10.0.0.220`, create the admin account, then create an API key
    under **Management > Tools > API** (format `id.token`). Put it in `HOMARR_API_KEY` in
    `platform/secrets/media-secrets.yaml`.
-2. In Jellyfin (`http://10.0.0.230:8096`), create an API key under
-   **Dashboard > API Keys** and put it in `JELLYFIN_API_KEY` in the same file. Without it
-   the Jellyfin integration and media-server widget are skipped; everything else still
-   provisions.
-3. Reseal and roll the pod so the sidecar picks the keys up:
+2. Reseal and commit the updated ciphertext. Argo updates the ConfigMap/Secrets, and the bootstrap
+   watcher reloads desired state. The reconcile helper forces an immediate full check:
 
 ```powershell
 .\scripts\seal-secrets.ps1
 git add platform/components/*/resources/sealed-secret-*.yaml; git commit -m "Add Homarr bootstrap keys"; git push
-kubectl --kubeconfig provisioning/ansible/kubeconfig rollout restart -n media deploy/media-stack
+.\scripts\reconcile-media-config.ps1
 ```
+
+`JELLYFIN_API_KEY` remains an optional fast path for a restored Jellyfin database. On a blank
+database, the bootstrap completes Jellyfin's startup wizard using the sealed `apps-admin`
+credentials and obtains a device token automatically; no Jellyfin API key needs to be copied by
+hand.
 
 The board is only laid out when the bootstrap creates it: rearranging tiles afterwards is
 safe, and deleting the `media` board makes the next restart rebuild it. After Jellyfin's API key is

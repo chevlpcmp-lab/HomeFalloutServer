@@ -192,11 +192,11 @@ stringData:
   WIREGUARD_PRIVATE_KEY: "$vpnPrivateKey"
   SERVER_COUNTRIES: "$vpnCountry"
 ---
-# HOMARR_API_KEY and JELLYFIN_API_KEY start empty: the media-stack bootstrap skips
-# Homarr provisioning until they are filled in. After the first deployment, create
-# the Homarr admin account and an API key (Management > Tools > API) plus a Jellyfin
-# API key (Dashboard > API Keys), paste them here, re-run seal-secrets.ps1, and
-# restart the media-stack deployment. See docs/configuration.md.
+# HOMARR_API_KEY starts empty: after the first deployment, create the Homarr admin
+# account and an API key (Management > Tools > API), paste it here, then reseal.
+# JELLYFIN_API_KEY is an optional fast path for restored state. On a blank database
+# the bootstrap completes first-run setup from apps-admin and authenticates itself.
+# See docs/configuration.md.
 apiVersion: v1
 kind: Secret
 metadata:

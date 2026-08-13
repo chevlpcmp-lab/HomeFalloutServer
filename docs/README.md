@@ -56,8 +56,8 @@ flowchart LR
   and the laptop kubeconfig.
 - Argo CD owns everything under `platform/` after bootstrap.
 - The router still owns DHCP exclusions and optional friendly DNS records.
-- Initial Homarr and Jellyfin admin setup is intentionally manual; the media
-  bootstrap automates the machine-to-machine wiring after API keys exist.
+- Initial Homarr and Immich admin setup is intentionally manual; the media bootstrap handles a
+  blank Jellyfin installation and automates the machine-to-machine wiring.
 
 If a value is not in its owning layer, fix the source of truth rather than patching the live object.
 

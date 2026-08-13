@@ -189,6 +189,9 @@ idempotent within their ownership boundaries.
 # Only bootstrap/reconcile after infrastructure is known good
 .\scripts\deploy.ps1 -SkipTerraform -SkipAnsible
 
+# Force the Git-owned media application settings to converge and verify completion
+.\scripts\reconcile-media-config.ps1
+
 # Only run infrastructure and guest configuration
 .\scripts\deploy.ps1 -SkipGitOps
 ```
@@ -219,6 +222,7 @@ the same order as `deploy.ps1`. Use it for diagnosis, not as a shortcut around a
 
 ## Rebuild boundary
 
-Terraform and Git can reconstruct compute and Kubernetes objects. They cannot reconstruct user
-data, databases, application config, the Sealed Secrets private key, or initial UI accounts. A real
-rebuild therefore needs the external backup set described in [Operations](operations.md).
+Terraform and Git can reconstruct compute, Kubernetes objects, and the bootstrap-owned media
+application settings. They cannot reconstruct user data, mutable databases/history, the Sealed
+Secrets private key, Homarr/Immich initial accounts, or media and photos. A real rebuild therefore
+still needs the external backup set described in [Operations](operations.md).

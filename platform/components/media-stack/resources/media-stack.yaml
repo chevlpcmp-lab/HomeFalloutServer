@@ -217,7 +217,27 @@ spec:
         # Idempotent: re-asserts the wiring on every pod restart.
         - name: bootstrap
           image: python:3.13-slim
-          command: [python3, /scripts/bootstrap.py]
+          # ConfigMap volumes update in place, but a running Python process does
+          # not reload its source. Watch the script digest so every Argo-applied
+          # Git change is reconciled automatically without a manual rollout.
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              last_digest=""
+              while true; do
+                digest="$(sha256sum /scripts/bootstrap.py | cut -d' ' -f1)"
+                if [ "$digest" != "$last_digest" ]; then
+                  echo "Bootstrap desired state changed: ${digest}"
+                  if python3 /scripts/bootstrap.py; then
+                    last_digest="$digest"
+                    echo "Bootstrap desired state reconciled: ${digest}"
+                  else
+                    echo "Bootstrap reconciliation failed; retrying in 60 seconds" >&2
+                  fi
+                fi
+                sleep 60
+              done
           securityContext:
             runAsUser: 1000
             runAsGroup: 1000

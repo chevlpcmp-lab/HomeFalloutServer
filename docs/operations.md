@@ -211,10 +211,13 @@ kills, and Immich ML/Jellyfin concurrency. Practical tuning order:
 3. Run Terraform and Ansible to recreate the template, VMs, mounts, and k3s.
 4. Restore the Sealed Secrets controller key before expecting committed ciphertext to decrypt.
 5. Bootstrap Argo CD and let the platform reconcile.
-6. Restore application config volumes and Immich Postgres.
+6. Let the media bootstrap reconstruct its Git-owned application wiring; restore application config
+   volumes and Immich Postgres when their history and user state must survive.
 7. Restore the matching `/mnt/data/photos` and any protected media data.
 8. Start applications, verify storage bindings, then verify the VPN boundary.
 
-The exact restore tooling depends on the backup target eventually chosen. Until a tested off-host
-backup exists, the lab is reproducible infrastructure with non-reproducible state—not a complete
-disaster-recovery system.
+The exact restore tooling depends on the backup target eventually chosen. Git can recreate the
+media integrations, libraries, retention policy, and a blank Jellyfin identity, but it cannot
+recreate media, photos, watch/request history, or application databases. Until a tested off-host
+backup exists, the lab is reproducible infrastructure with non-reproducible personal state, not a
+complete disaster-recovery system.

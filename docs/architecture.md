@@ -158,9 +158,10 @@ flowchart LR
     Immich --> Photos[("Photo library")]
 ```
 
-The media `bootstrap` sidecar discovers application API keys from their persistent config files
-and idempotently asserts the machine-to-machine connections. Interactive identity setup remains in
-the application UIs. See [First-run application wiring](configuration.md).
+The media `bootstrap` sidecar discovers generated application API keys from their persistent config
+files and idempotently asserts the Git-owned machine-to-machine connections. It also completes a
+blank Jellyfin installation from the sealed shared-admin credentials. Homarr and Immich retain
+their one-time interactive identity setup. See [First-run application wiring](configuration.md).
 
 ## VPN boundary and startup ordering
 

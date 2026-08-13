@@ -74,17 +74,22 @@ The bootstrap helper continuously and idempotently configures:
 - `/data/library/movies` and `/data/library/tv` as Arr root folders.
 - Radarr and Sonarr as Prowlarr applications.
 - FlareSolverr as Prowlarr's proxy.
+- EZTV, LimeTorrents, Nyaa.si, and YTS as credential-free Prowlarr indexers.
+- Matching optional `Ultra-HD` quality profiles in Radarr and Sonarr.
 - Bazarr's credential-free English/French providers, language profile, search policy, and
   Radarr/Sonarr/Jellyfin connections.
 - Jellyfin library-update notifications in Radarr and Sonarr.
 - Jellyfin Movies and TV Shows libraries backed by the shared read-only media mount.
 - Seerr's Jellyfin admin, enabled libraries, and default Radarr/Sonarr instances.
 - Maintainerr's Jellyfin, Radarr, Sonarr, Seerr, and qBittorrent connections.
+- Maintainerr's storage-aware cleanup rules and their review windows.
 - Homarr tiles, integrations, board, and widgets once its API key exists.
 
-Jellyfin and Homarr need initial admin accounts before their API keys can be added and resealed.
-Once those values exist, Seerr and Maintainerr are configured without browser wizards. External
-Prowlarr indexer providers still require an explicit provider choice and any provider credentials.
+Jellyfin first-run setup and its shared administrator are bootstrap-managed from the sealed
+`apps-admin` credentials. Homarr still needs its initial admin account and API key because its API
+cannot create the account that owns the key. Once that value exists, the dashboard, Seerr, and
+Maintainerr are configured without browser wizards. External
+Additional private Prowlarr indexers still require an explicit provider choice and sealed credentials.
 The full procedure is in [First-run application wiring](configuration.md).
 
 ## Homarr
