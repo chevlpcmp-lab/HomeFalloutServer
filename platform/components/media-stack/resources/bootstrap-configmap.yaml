@@ -27,6 +27,8 @@ data:
     QB_URL       = "http://localhost:8080"
     BAZARR_URL   = "http://localhost:6767"
     FLARE_URL    = "http://localhost:8191"
+    SEERR_URL    = "http://localhost:5055"
+    MAINTAINERR_URL = "http://localhost:6246"
 
     HOMARR_URL       = os.environ.get("HOMARR_URL", "http://homarr.media.svc.cluster.local")
     HOMARR_API_KEY   = os.environ.get("HOMARR_API_KEY", "")
@@ -138,6 +140,31 @@ data:
         req = urllib.request.Request(url, method="DELETE", headers={"X-Api-Key": api_key})
         with urllib.request.urlopen(req, timeout=10):
             pass
+
+    def json_request(method, url, payload=None, headers=None, opener=None, timeout=90):
+        data = json.dumps(payload).encode() if payload is not None else None
+        req = urllib.request.Request(url, data=data, method=method,
+            headers={"Content-Type": "application/json", **(headers or {})})
+        client = opener or urllib.request.build_opener()
+        try:
+            with client.open(req, timeout=timeout) as r:
+                content = r.read()
+                return json.loads(content) if content else {}
+        except urllib.error.HTTPError as e:
+            body = e.read().decode(errors="replace")
+            print(f"{method} {url} -> HTTP {e.code}: {body[:500]}", flush=True)
+            raise
+
+    def set_fields(fields, values):
+        """Return an Arr field list with named values replaced, preserving schema defaults."""
+        result = [dict(field) for field in fields]
+        by_name = {field.get("name"): field for field in result}
+        for name, value in values.items():
+            if name in by_name:
+                by_name[name]["value"] = value
+            else:
+                result.append({"name": name, "value": value})
+        return result
 
     def wait_ready(base_url, api_key, name, ver="v3"):
         print(f"Waiting for {name}...", flush=True)
@@ -275,43 +302,92 @@ data:
 
     def add_flaresolverr(prowlarr_key):
         proxies = get(f"{PROWLARR_URL}/api/v1/indexerproxy", prowlarr_key)
-        if any(p.get("name") == "FlareSolverr" for p in proxies):
-            print("Prowlarr: FlareSolverr already configured", flush=True)
-            return
-        post(f"{PROWLARR_URL}/api/v1/indexerproxy", prowlarr_key, {
+        existing = next((p for p in proxies
+            if p.get("implementation") == "FlareSolverr" or p.get("name") == "FlareSolverr"), None)
+        payload = dict(existing or {})
+        payload.update({
             "name": "FlareSolverr",
             "implementation": "FlareSolverr",
             "configContract": "FlareSolverrSettings",
-            "fields": [
-                {"name": "host",           "value": FLARE_URL},
-                {"name": "requestTimeout", "value": 60},
-            ],
+            "fields": set_fields(payload.get("fields", []), {
+                "host": FLARE_URL,
+                "requestTimeout": 60,
+            }),
             "tags": [],
         })
-        print("Prowlarr: FlareSolverr proxy added", flush=True)
+        if existing:
+            put(f"{PROWLARR_URL}/api/v1/indexerproxy/{existing['id']}", prowlarr_key, payload)
+        else:
+            post(f"{PROWLARR_URL}/api/v1/indexerproxy", prowlarr_key, payload)
+        print(f"Prowlarr: FlareSolverr proxy {'updated' if existing else 'added'}", flush=True)
 
     def add_prowlarr_app(prowlarr_key, app_name, app_url, app_key):
         apps = get(f"{PROWLARR_URL}/api/v1/applications", prowlarr_key)
-        if any(a.get("name") == app_name for a in apps):
-            print(f"Prowlarr: {app_name} already configured", flush=True)
-            return
-        is_radarr = app_name == "Radarr"
-        cats = ([2000, 2010, 2020, 2030, 2040, 2045, 2050, 2060]
-                if is_radarr else
-                [5000, 5010, 5020, 5030, 5040, 5045, 5050, 5060, 5070])
-        post(f"{PROWLARR_URL}/api/v1/applications", prowlarr_key, {
-            "name":           app_name,
+        existing = next((a for a in apps
+            if a.get("implementation") == app_name or a.get("name") == app_name), None)
+        schemas = get(f"{PROWLARR_URL}/api/v1/applications/schema", prowlarr_key)
+        schema = next(s for s in schemas if s.get("implementation") == app_name)
+        payload = dict(existing or schema)
+        # Omitting syncLevel makes Prowlarr save the app as "disabled". Always
+        # reconcile existing records too, so indexers propagate after upgrades or
+        # after an indexer is added to Prowlarr later.
+        payload.update({
+            "name": app_name,
             "implementation": app_name,
             "configContract": f"{app_name}Settings",
-            "fields": [
-                {"name": "prowlarrUrl",    "value": PROWLARR_URL},
-                {"name": "baseUrl",        "value": app_url},
-                {"name": "apiKey",         "value": app_key},
-                {"name": "syncCategories", "value": cats},
-            ],
+            "syncLevel": "fullSync",
+            "fields": set_fields(payload.get("fields", schema.get("fields", [])), {
+                "prowlarrUrl": PROWLARR_URL,
+                "baseUrl": app_url,
+                "apiKey": app_key,
+            }),
             "tags": [],
         })
-        print(f"Prowlarr: {app_name} app added", flush=True)
+        if existing:
+            put(f"{PROWLARR_URL}/api/v1/applications/{existing['id']}", prowlarr_key, payload)
+        else:
+            post(f"{PROWLARR_URL}/api/v1/applications", prowlarr_key, payload)
+        print(f"Prowlarr: {app_name} app {'updated' if existing else 'added'} with full sync", flush=True)
+
+    def add_jellyfin_notification(base_url, api_key, app):
+        if not JELLYFIN_API_KEY:
+            print(f"{app}: Jellyfin notification skipped (JELLYFIN_API_KEY not set)", flush=True)
+            return
+        notifications = get(f"{base_url}/api/v3/notification", api_key)
+        existing = next((n for n in notifications
+            if n.get("implementation") == "MediaBrowser" or n.get("name") == "Jellyfin"), None)
+        schemas = get(f"{base_url}/api/v3/notification/schema", api_key)
+        schema = next(s for s in schemas if s.get("implementation") == "MediaBrowser")
+        payload = dict(existing or schema)
+        payload.update({
+            "name": "Jellyfin",
+            "implementation": "MediaBrowser",
+            "implementationName": "Emby / Jellyfin",
+            "configContract": "MediaBrowserSettings",
+            "onGrab": False,
+            "onDownload": True,
+            "onUpgrade": True,
+            "onRename": True,
+            "onHealthIssue": False,
+            "includeHealthWarnings": False,
+            "fields": set_fields(payload.get("fields", schema.get("fields", [])), {
+                "host": "jellyfin.media.svc.cluster.local",
+                "port": 8096,
+                "useSsl": False,
+                "urlBase": "",
+                "apiKey": JELLYFIN_API_KEY,
+                "notify": False,
+                "updateLibrary": True,
+            }),
+            "tags": [],
+        })
+        # Test before saving so a bad Jellyfin key never replaces a working connection.
+        post(f"{base_url}/api/v3/notification/test", api_key, payload)
+        if existing:
+            put(f"{base_url}/api/v3/notification/{existing['id']}", api_key, payload)
+        else:
+            post(f"{base_url}/api/v3/notification", api_key, payload)
+        print(f"{app}: Jellyfin library-update connection {'updated' if existing else 'added'}", flush=True)
 
     # ── Bazarr (best-effort: its settings API is form-based and undocumented) ─
 
@@ -355,6 +431,173 @@ data:
         with urllib.request.urlopen(req, timeout=30):
             pass
         print("Bazarr: Radarr and Sonarr connections configured", flush=True)
+
+    # ── Seerr ────────────────────────────────────────────────────────────────
+
+    def configure_seerr(seerr_key, radarr_key, sonarr_key):
+        if not (ADMIN_USER and ADMIN_PASS):
+            print("Seerr: setup skipped (apps-admin credentials not set)", flush=True)
+            return
+
+        print("Configuring Seerr...", flush=True)
+        public = json_request("GET", f"{SEERR_URL}/api/v1/settings/public")
+        initialized = bool(public.get("initialized"))
+        jar = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+        login = {"username": ADMIN_USER, "password": ADMIN_PASS}
+        if not initialized:
+            # The initial login creates Seerr's administrator and its own Jellyfin
+            # API token. The hostname field is a bare host; Seerr adds the scheme.
+            login.update({
+                "hostname": "jellyfin.media.svc.cluster.local",
+                "port": 8096,
+                "useSsl": False,
+                "urlBase": "",
+                "serverType": 2,  # MediaServerType.JELLYFIN
+            })
+        json_request("POST", f"{SEERR_URL}/api/v1/auth/jellyfin", login, opener=opener)
+        print("Seerr: authenticated with the shared Jellyfin administrator", flush=True)
+
+        # Refresh the Jellyfin library list and enable movie/TV libraries. This is
+        # safe to re-run and picks up libraries added later.
+        libraries = json_request("GET",
+            f"{SEERR_URL}/api/v1/settings/jellyfin/library?sync=true", opener=opener)
+        enabled_ids = [str(lib["id"]) for lib in libraries
+            if lib.get("type") in ("movie", "show") or lib.get("enabled")]
+        if enabled_ids:
+            query = urllib.parse.urlencode({"enable": ",".join(enabled_ids)})
+            json_request("GET", f"{SEERR_URL}/api/v1/settings/jellyfin/library?{query}", opener=opener)
+            print(f"Seerr: enabled {len(enabled_ids)} Jellyfin movie/TV libraries", flush=True)
+
+        def preferred_profile(base_url, api_key):
+            profiles = get(f"{base_url}/api/v3/qualityprofile", api_key)
+            return (next((p for p in profiles if p.get("name") == "HD - 720p/1080p"), None)
+                or next((p for p in profiles if p.get("name") == "HD-1080p"), None)
+                or profiles[0])
+
+        radarr_profile = preferred_profile(RADARR_URL, radarr_key)
+        sonarr_profile = preferred_profile(SONARR_URL, sonarr_key)
+        wanted = {
+            "radarr": {
+                "name": "Radarr",
+                "hostname": "localhost",
+                "port": 7878,
+                "apiKey": radarr_key,
+                "useSsl": False,
+                "baseUrl": "",
+                "activeProfileId": radarr_profile["id"],
+                "activeProfileName": radarr_profile["name"],
+                "activeDirectory": "/data/library/movies",
+                "is4k": False,
+                "minimumAvailability": "released",
+                "isDefault": True,
+                "externalUrl": LAN["radarr"],
+                "syncEnabled": True,
+                "preventSearch": False,
+            },
+            "sonarr": {
+                "name": "Sonarr",
+                "hostname": "localhost",
+                "port": 8989,
+                "apiKey": sonarr_key,
+                "useSsl": False,
+                "baseUrl": "",
+                "activeProfileId": sonarr_profile["id"],
+                "activeProfileName": sonarr_profile["name"],
+                "activeDirectory": "/data/library/tv",
+                "is4k": False,
+                "enableSeasonFolders": True,
+                "isDefault": True,
+                "externalUrl": LAN["sonarr"],
+                "syncEnabled": True,
+                "preventSearch": False,
+            },
+        }
+        for kind, payload in wanted.items():
+            json_request("POST", f"{SEERR_URL}/api/v1/settings/{kind}/test",
+                payload, opener=opener)
+            existing = json_request("GET", f"{SEERR_URL}/api/v1/settings/{kind}", opener=opener)
+            current = next((item for item in existing if item.get("name") == payload["name"]), None)
+            if current:
+                json_request("PUT", f"{SEERR_URL}/api/v1/settings/{kind}/{current['id']}",
+                    payload, opener=opener)
+            else:
+                json_request("POST", f"{SEERR_URL}/api/v1/settings/{kind}", payload, opener=opener)
+            print(f"Seerr: {payload['name']} connection {'updated' if current else 'added'}", flush=True)
+
+        if not initialized:
+            json_request("POST", f"{SEERR_URL}/api/v1/settings/initialize", {}, opener=opener)
+            print("Seerr: first-run setup completed", flush=True)
+
+    # ── Maintainerr ──────────────────────────────────────────────────────────
+
+    def configure_maintainerr(seerr_key, radarr_key, sonarr_key):
+        print("Waiting for Maintainerr...", flush=True)
+        for _ in range(120):
+            try:
+                json_request("GET", f"{MAINTAINERR_URL}/api/health/ready", timeout=5)
+                break
+            except Exception:
+                time.sleep(5)
+        else:
+            raise RuntimeError("Maintainerr not ready after 10 minutes")
+        print("Maintainerr ready", flush=True)
+
+        def mt(method, path, payload=None):
+            return json_request(method, f"{MAINTAINERR_URL}{path}", payload)
+
+        def require_ok(label, result):
+            if result.get("status") != "OK":
+                raise RuntimeError(f"Maintainerr {label} test failed: {result.get('message', 'unknown error')}")
+
+        if not JELLYFIN_API_KEY:
+            raise RuntimeError("Maintainerr needs JELLYFIN_API_KEY")
+        jf_users = json_request("GET", f"{SVC['jellyfin']}/Users",
+            headers={"X-Emby-Token": JELLYFIN_API_KEY})
+        jf_user = next((u for u in jf_users if u.get("Name", "").lower() == ADMIN_USER.lower()), None)
+        jellyfin = {
+            "jellyfin_url": SVC["jellyfin"],
+            "jellyfin_api_key": JELLYFIN_API_KEY,
+        }
+        if jf_user:
+            jellyfin["jellyfin_user_id"] = jf_user["Id"]
+        require_ok("Jellyfin", mt("POST", "/api/settings/jellyfin/test", jellyfin))
+        require_ok("Jellyfin save", mt("POST", "/api/settings/jellyfin", jellyfin))
+        print("Maintainerr: Jellyfin connection configured", flush=True)
+
+        for kind, name, url, api_key in [
+            ("radarr", "Radarr", RADARR_URL, radarr_key),
+            ("sonarr", "Sonarr", SONARR_URL, sonarr_key),
+        ]:
+            payload = {"serverName": name, "url": url, "apiKey": api_key}
+            require_ok(name, mt("POST", f"/api/settings/test/{kind}", payload))
+            existing = mt("GET", f"/api/settings/{kind}")
+            current = next((item for item in existing if item.get("serverName") == name), None)
+            result = mt("PUT", f"/api/settings/{kind}/{current['id']}", payload) if current \
+                else mt("POST", f"/api/settings/{kind}", payload)
+            require_ok(f"{name} save", result)
+            print(f"Maintainerr: {name} connection {'updated' if current else 'added'}", flush=True)
+
+        seerr = {"url": SEERR_URL, "api_key": seerr_key}
+        require_ok("Seerr", mt("POST", "/api/settings/test/seerr", seerr))
+        require_ok("Seerr save", mt("POST", "/api/settings/seerr", seerr))
+        print("Maintainerr: Seerr connection configured", flush=True)
+
+        if ADMIN_USER and ADMIN_PASS:
+            download_client = {
+                "download_client_url": QB_URL,
+                "download_client_username": ADMIN_USER,
+                "download_client_password": ADMIN_PASS,
+                "download_client_delete_data": True,
+                "download_client_fallback_ratio": 0.5,
+            }
+            require_ok("qBittorrent", mt("POST", "/api/settings/test/download-client", download_client))
+            require_ok("qBittorrent save", mt("POST", "/api/settings/download-client", download_client))
+            print("Maintainerr: qBittorrent connection configured", flush=True)
+
+        if not mt("GET", "/api/settings/test/setup"):
+            raise RuntimeError("Maintainerr still reports an incomplete setup")
+        print("Maintainerr: setup and all configured connections verified", flush=True)
 
     # ── Jellyfin ──────────────────────────────────────────────────────────────
 
@@ -558,6 +801,8 @@ data:
     add_flaresolverr(keys["prowlarr"])
     add_prowlarr_app(keys["prowlarr"], "Radarr", RADARR_URL, keys["radarr"])
     add_prowlarr_app(keys["prowlarr"], "Sonarr", SONARR_URL, keys["sonarr"])
+    add_jellyfin_notification(RADARR_URL, keys["radarr"], "Radarr")
+    add_jellyfin_notification(SONARR_URL, keys["sonarr"], "Sonarr")
 
     try:
         configure_bazarr(keys["bazarr"], keys["radarr"], keys["sonarr"])
@@ -571,6 +816,14 @@ data:
             print(f"Jellyfin: admin sync failed ({type(e).__name__}: {e}) - configure manually if needed", flush=True)
     else:
         print("Jellyfin: admin sync skipped (needs apps-admin secret and JELLYFIN_API_KEY)", flush=True)
+
+    # Seerr's own API key cannot administer its settings. Log in with the shared
+    # Jellyfin admin to complete first-run setup and reconcile its Arr instances.
+    configure_seerr(keys["seerr"], keys["radarr"], keys["sonarr"])
+
+    # Maintainerr has an unauthenticated LAN settings API. Reconcile every service
+    # it can use so its cleanup engine is ready without a browser wizard.
+    configure_maintainerr(keys["seerr"], keys["radarr"], keys["sonarr"])
 
     if HOMARR_API_KEY:
         # A failure here must not crash-loop the pod and re-run the arr wiring

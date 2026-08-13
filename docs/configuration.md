@@ -8,10 +8,13 @@ every pod restart. It configures:
 | From | To | URL |
 | --- | --- | --- |
 | Radarr / Sonarr | qBittorrent | `http://localhost:8080` |
-| Radarr / Sonarr | Prowlarr | configured by Prowlarr using `http://localhost:7878` / `:8989` |
+| Prowlarr | Radarr / Sonarr | full-sync Applications using `http://localhost:7878` / `:8989` |
 | Prowlarr | FlareSolverr | `http://localhost:8191` |
 | Bazarr | Radarr | `http://localhost:7878` |
 | Bazarr | Sonarr | `http://localhost:8989` |
+| Radarr / Sonarr | Jellyfin | Emby/Jellyfin library-update notification over Service DNS |
+| Seerr | Jellyfin, Radarr, Sonarr | first-run admin, libraries, profiles, and default instances |
+| Maintainerr | Jellyfin, Radarr, Sonarr, Seerr, qBittorrent | cleanup-engine service configuration |
 | Homarr | everything | Service DNS, for example `http://radarr.media.svc.cluster.local` |
 
 It also creates the shared paths and sets them in qBittorrent and the Arr applications:
@@ -45,6 +48,28 @@ integration credentials. Check progress or failures with:
 kubectl --kubeconfig provisioning/ansible/kubeconfig logs -n media deploy/media-stack -c bootstrap
 ```
 
+## What “connected” looks like
+
+Radarr and Sonarr's **Settings > Connect** page contains notification providers. It is not where
+their Prowlarr relationship appears. The bootstrap adds an **Emby / Jellyfin** entry there so
+Jellyfin refreshes after imports and renames.
+
+| UI | Expected record |
+| --- | --- |
+| Radarr / Sonarr **Settings > Download Clients** | `qBittorrent` |
+| Radarr / Sonarr **Settings > Indexers** | Indexers synchronized from Prowlarr |
+| Radarr / Sonarr **Settings > Connect** | `Jellyfin` library-update connection |
+| Prowlarr **Settings > Apps** | `Radarr` and `Sonarr`, both set to Full Sync |
+| Prowlarr **Settings > Indexers** | Your chosen external indexer providers |
+| Prowlarr **Settings > Indexers > Proxies** | `FlareSolverr` |
+| Seerr **Settings > Services** | Default Radarr and Sonarr instances |
+| Maintainerr **Settings** | Jellyfin, Radarr, Sonarr, Seerr, and qBittorrent |
+
+Prowlarr cannot infer which external indexer provider you are authorized to use or invent its
+credentials. Add each chosen provider once in Prowlarr. Because the Applications are reconciled to
+Full Sync, Prowlarr publishes those indexers to Radarr and Sonarr automatically. FlareSolverr is a
+proxy used by compatible indexers; creating it does not create an indexer by itself.
+
 ## Homarr dashboard provisioning
 
 The bootstrap also fills Homarr with app tiles (with LAN links and ping URLs),
@@ -69,10 +94,9 @@ kubectl --kubeconfig provisioning/ansible/kubeconfig rollout restart -n media de
 ```
 
 The board is only laid out when the bootstrap creates it: rearranging tiles afterwards is
-safe, and deleting the `media` board makes the next restart rebuild it. Seerr and
-Maintainerr still need their own first-run wizards (they authenticate against Jellyfin
-interactively); the bootstrap only reads Seerr's generated API key for the Homarr
-integration.
+safe, and deleting the `media` board makes the next restart rebuild it. After Jellyfin's API key is
+available, the bootstrap completes Seerr's first-run Jellyfin login, enables its movie/TV
+libraries, creates its default Arr services, and configures Maintainerr through its API.
 
 qBittorrent's traffic uses Gluetun's default route and kill switch. Proton NAT-PMP port forwarding
 is enabled, and Gluetun automatically updates qBittorrent's listening port whenever Proton assigns

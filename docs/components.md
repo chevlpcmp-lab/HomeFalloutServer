@@ -76,11 +76,15 @@ The bootstrap helper continuously and idempotently configures:
 - Radarr and Sonarr as Prowlarr applications.
 - FlareSolverr as Prowlarr's proxy.
 - Radarr and Sonarr connections in Bazarr.
+- Jellyfin library-update notifications in Radarr and Sonarr.
+- Seerr's Jellyfin admin, enabled libraries, and default Radarr/Sonarr instances.
+- Maintainerr's Jellyfin, Radarr, Sonarr, Seerr, and qBittorrent connections.
 - Homarr tiles, integrations, board, and widgets once its API key exists.
 
-Seerr and Maintainerr still require their initial browser wizards. Jellyfin and Homarr need initial
-admin accounts before their API keys can be added and resealed. The full procedure is in
-[First-run application wiring](configuration.md).
+Jellyfin and Homarr need initial admin accounts before their API keys can be added and resealed.
+Once those values exist, Seerr and Maintainerr are configured without browser wizards. External
+Prowlarr indexer providers still require an explicit provider choice and any provider credentials.
+The full procedure is in [First-run application wiring](configuration.md).
 
 ## Homarr
 
