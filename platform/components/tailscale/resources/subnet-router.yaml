@@ -4,8 +4,8 @@
 # media apps (10.0.0.230-240), Proxmox, and any other LAN host - without opening
 # ports on the router.
 #
-# NOT deployed until the `tailscale` component is uncommented in
-# platform/values/values-prod.yaml. See docs/tailscale.md for the enable runbook.
+# Enabled by platform/values/values-prod.yaml. Route approval and operational
+# checks are documented in docs/tailscale.md.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -48,6 +48,8 @@ spec:
             # Home LAN (Proxmox, MetalLB addresses, everything), then the cluster
             # pod and service CIDRs so tailnet clients can also hit them directly.
             - { name: TS_ROUTES, value: "10.0.0.0/24,10.42.0.0/16,10.43.0.0/16" }
+            # Explicitly clear any exit-node preference retained in the state PVC.
+            - { name: TS_EXTRA_ARGS, value: "--advertise-exit-node=false" }
             - { name: TS_HOSTNAME, value: homefallout }
             - { name: TS_STATE_DIR, value: /var/lib/tailscale }
             # File state on the PVC instead of a kube Secret, and kernel (not
