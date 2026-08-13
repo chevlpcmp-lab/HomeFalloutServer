@@ -18,8 +18,7 @@ containers within each application. The definitive configuration remains under
 | `jellyfin` | `media` | Local resources | 85 | Streams the media library directly over the LAN |
 | `immich` | `photos` | Local resources | 87 | Runs photo storage, API, database, cache, and ML |
 
-The `tailscale` resources-only component is also present but commented out in production values.
-When enabled at wave 25, it runs a subnet router in `networking`; see
+The `tailscale` resources-only component runs at wave 25 as a subnet router in `networking`; see
 [Tailscale remote access](tailscale.md).
 
 The `infrastructure` AppProject can target all namespaces and cluster resources. The
@@ -158,13 +157,13 @@ repository credential is currently an SSH deploy key stored in a gitignored Kube
 The `argocd` component owns only a second LoadBalancer Service at `10.0.0.200`; keeping that Service
 separate lets future upstream manifest refreshes remain untouched.
 
-### Tailscale (staged)
+### Tailscale
 
-The disabled Tailscale Deployment advertises `10.0.0.0/24`, `10.42.0.0/16`, and `10.43.0.0/16`
+The Tailscale Deployment advertises `10.0.0.0/24`, `10.42.0.0/16`, and `10.43.0.0/16`
 from a single subnet router. It requests `NET_ADMIN`, mounts `/dev/net/tun`, persists identity in a
-512 Mi retained PVC, and offers optional exit-node routing. Its auth key is sealed in Git, but the
-Application is not rendered until the component block is uncommented and its routes are approved
-in the Tailscale admin console.
+512 Mi retained PVC, and offers optional exit-node routing. Its auth key is sealed in Git. The
+advertised routes and optional exit node must be approved in the Tailscale admin console unless
+tailnet policy auto-approvers already cover them.
 
 ## Image update policy
 

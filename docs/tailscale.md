@@ -13,8 +13,7 @@ can reach everything as if it were on the LAN, with no ports opened on the route
 It also advertises itself as an **exit node** (route *all* traffic through home), which is
 optional to approve and use.
 
-The component is staged but not deployed: it is commented out in
-`platform/values/values-prod.yaml`.
+The component is enabled in `platform/values/values-prod.yaml` and pinned to the apps worker.
 
 ## Enabling it
 
@@ -28,8 +27,7 @@ The component is staged but not deployed: it is commented out in
    .\scripts\seal-secrets.ps1
    ```
 
-4. Uncomment the `tailscale` component in `platform/values/values-prod.yaml`, then commit
-   and push the sealed secret and values change. Argo CD deploys the router.
+4. Commit and push the sealed secret. Argo CD deploys the enabled router.
 5. In the admin console, open **Machines**, find `homefallout`, and **approve the
    advertised subnet routes** (Edit route settings). Approve the exit node too if wanted.
    Without approval the routes stay inactive.

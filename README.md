@@ -29,7 +29,7 @@ and Argo CD continuously reconciles the platform and applications from Git.
 | Networking | MetalLB in L2 mode | Gives LAN-friendly addresses to services |
 | GitOps | Argo CD | Self-heals the cluster from this repository |
 | Secrets | Bitnami Sealed Secrets | Keeps only encrypted application secrets in Git |
-| Remote access | Tailscale subnet router (staged) | Optional private access without router ports |
+| Remote access | Tailscale subnet router | Private access without router ports |
 | Workloads | Jellyfin, Immich, Homarr, and the VPN media stack | Streams, stores, requests, and automates media |
 
 ```mermaid

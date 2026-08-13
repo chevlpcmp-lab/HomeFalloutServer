@@ -32,6 +32,10 @@ spec:
     metadata:
       labels: { app: tailscale-subnet-router }
     spec:
+      # Keep general platform services on the apps worker and leave the media
+      # worker's RAM/CPU budget to Jellyfin, Immich, and the VPN media pod.
+      nodeSelector:
+        homelab.charles/pool: apps
       containers:
         - name: tailscale
           image: tailscale/tailscale:v1.102.2

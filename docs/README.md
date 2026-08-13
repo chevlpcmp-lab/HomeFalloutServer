@@ -34,7 +34,7 @@ it when the gremlins arrive.
 | GitOps root | `homefallout-root` in `argocd` |
 | Persistent config | Node-local PVCs on Proxmox `local` |
 | Bulk data | 600 GB disk on `local-lvm`, mounted at `/mnt/data` |
-| Remote access model | LAN-only now; Tailscale subnet router staged but disabled |
+| Remote access model | LAN plus an authenticated Tailscale subnet router |
 
 ## Source-of-truth boundaries
 
