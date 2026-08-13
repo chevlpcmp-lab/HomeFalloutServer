@@ -21,9 +21,25 @@ It also creates the shared paths and sets them in qBittorrent and the Arr applic
 - Radarr root: `/data/library/movies`
 - Sonarr root: `/data/library/tv`
 
-qBittorrent's WebUI credentials are synced from the `qbittorrent-auth` secret, so the LAN
-login is the password in `platform/secrets/media-secrets.yaml` rather than the random one
-qBittorrent prints to its log. Check progress or failures with:
+## One shared admin account
+
+The `apps-admin` secret (`platform/secrets/media-secrets.yaml`) is the single source of
+truth for the admin login, and the bootstrap enforces it on every pod restart:
+
+| App | Coverage |
+| --- | --- |
+| qBittorrent | WebUI credentials synced |
+| Radarr / Sonarr / Prowlarr | forms login enforced with the shared credentials |
+| Bazarr | form login enforced with the shared credentials |
+| Jellyfin | shared admin user created/password-synced (needs `JELLYFIN_API_KEY`) |
+| Seerr | signs in with Jellyfin, so the shared credentials work automatically |
+| Maintainerr | has no login system |
+| Homarr | set the admin password to match once by hand (its API cannot reset the account that owns the API key) |
+
+To rotate the password: edit `apps-admin` in the plaintext file, run
+`.\scripts\seal-secrets.ps1`, commit and push, and restart the media-stack deployment.
+The bootstrap pushes the new password everywhere, including Homarr's stored qBittorrent
+integration credentials. Check progress or failures with:
 
 ```powershell
 kubectl --kubeconfig provisioning/ansible/kubeconfig logs -n media deploy/media-stack -c bootstrap

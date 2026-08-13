@@ -24,7 +24,7 @@ flowchart LR
 | Secret | Namespace | Consumer | Committed form |
 | --- | --- | --- | --- |
 | `gluetun-vpn` | `media` | Gluetun | `media-stack/resources/sealed-secret-gluetun-vpn.yaml` |
-| `qbittorrent-auth` | `media` | qBittorrent + bootstrap | `media-stack/resources/sealed-secret-qbittorrent-auth.yaml` |
+| `apps-admin` | `media` | Shared admin login, enforced by the bootstrap across the media apps | `media-stack/resources/sealed-secret-apps-admin.yaml` |
 | `homarr-secrets` | `media` | Homarr + bootstrap | `homarr/resources/sealed-secret-homarr-secrets.yaml` |
 | `immich-database` | `photos` | Immich server + Postgres | `immich/resources/sealed-secret-immich-database.yaml` |
 | `tailscale-auth` | `networking` | Tailscale subnet router (staged, see docs/tailscale.md) | `tailscale/resources/sealed-secret-tailscale-auth.yaml` |
@@ -48,7 +48,7 @@ Commit only these generated encrypted files:
 
 ```text
 platform/components/media-stack/resources/sealed-secret-gluetun-vpn.yaml
-platform/components/media-stack/resources/sealed-secret-qbittorrent-auth.yaml
+platform/components/media-stack/resources/sealed-secret-apps-admin.yaml
 platform/components/homarr/resources/sealed-secret-homarr-secrets.yaml
 platform/components/immich/resources/sealed-secret-immich-database.yaml
 platform/components/tailscale/resources/sealed-secret-tailscale-auth.yaml

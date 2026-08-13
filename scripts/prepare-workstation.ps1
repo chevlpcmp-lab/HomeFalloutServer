@@ -178,7 +178,7 @@ if (-not (Test-Path -LiteralPath $mediaSecretPath)) {
     $vpnCountry = Read-Host 'VPN server country [Canada]'
     if ([string]::IsNullOrWhiteSpace($vpnCountry)) { $vpnCountry = 'Canada' }
     $homarrKey = New-RandomHex 32
-    $qbPassword = New-RandomHex 16
+    $adminPassword = New-RandomHex 16
     $mediaSecret = @"
 apiVersion: v1
 kind: Secret
@@ -208,17 +208,18 @@ stringData:
   HOMARR_API_KEY: ""
   JELLYFIN_API_KEY: ""
 ---
-# The bootstrap sidecar pushes these credentials into qBittorrent's WebUI so LAN
-# logins use a known password instead of the random one qBittorrent generates.
+# The one shared admin account. The bootstrap sidecar enforces it in qBittorrent,
+# Radarr, Sonarr, Prowlarr, Bazarr, and Jellyfin (Seerr signs in with Jellyfin;
+# Maintainerr has no login; set Homarr's admin password to match once by hand).
 apiVersion: v1
 kind: Secret
 metadata:
-  name: qbittorrent-auth
+  name: apps-admin
   namespace: media
 type: Opaque
 stringData:
-  WEBUI_USERNAME: "admin"
-  WEBUI_PASSWORD: "$qbPassword"
+  USERNAME: "admin"
+  PASSWORD: "$adminPassword"
 "@
     Set-Content -LiteralPath $mediaSecretPath -Value $mediaSecret -Encoding UTF8
     Write-Host "Created $mediaSecretPath (gitignored)."

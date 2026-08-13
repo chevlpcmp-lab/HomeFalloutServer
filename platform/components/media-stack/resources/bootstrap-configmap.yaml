@@ -31,8 +31,12 @@ data:
     HOMARR_URL       = os.environ.get("HOMARR_URL", "http://homarr.media.svc.cluster.local")
     HOMARR_API_KEY   = os.environ.get("HOMARR_API_KEY", "")
     JELLYFIN_API_KEY = os.environ.get("JELLYFIN_API_KEY", "")
-    QB_USER          = os.environ.get("QB_USER", "")
-    QB_PASS          = os.environ.get("QB_PASS", "")
+    # One shared admin account (apps-admin secret) enforced across every app that
+    # supports it: qBittorrent, Radarr, Sonarr, Prowlarr, Bazarr, and Jellyfin.
+    # Seerr signs in with Jellyfin, Maintainerr has no login, and Homarr's own
+    # admin must be set once by hand (its API cannot reset the key owner's password).
+    ADMIN_USER       = os.environ.get("ADMIN_USER", "")
+    ADMIN_PASS       = os.environ.get("ADMIN_PASS", "")
 
     # LAN addresses the dashboard links to (metallb LoadBalancer IPs).
     LAN = {
@@ -122,6 +126,14 @@ data:
             print(f"POST {url} -> HTTP {e.code}: {body[:500]}", flush=True)
             raise
 
+    def put(url, api_key, payload):
+        data = json.dumps(payload).encode()
+        req = urllib.request.Request(url, data=data, method="PUT",
+            headers={"X-Api-Key": api_key, "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            content = r.read()
+            return json.loads(content) if content else {}
+
     def delete(url, api_key):
         req = urllib.request.Request(url, method="DELETE", headers={"X-Api-Key": api_key})
         with urllib.request.urlopen(req, timeout=10):
@@ -169,14 +181,14 @@ data:
         })
         print("qBittorrent: save=/data/downloads/complete temp=/data/downloads/incomplete", flush=True)
 
-        # Sync the WebUI credentials from the secret so LAN browser logins are
-        # deterministic instead of the random password qBittorrent generates.
-        # Localhost callers bypass auth either way.
-        if QB_USER and QB_PASS:
-            set_prefs({"web_ui_username": QB_USER, "web_ui_password": QB_PASS})
-            print("qBittorrent: WebUI credentials synced from secret", flush=True)
+        # Sync the WebUI credentials from the shared admin secret so LAN browser
+        # logins are deterministic instead of the random password qBittorrent
+        # generates. Localhost callers bypass auth either way.
+        if ADMIN_USER and ADMIN_PASS:
+            set_prefs({"web_ui_username": ADMIN_USER, "web_ui_password": ADMIN_PASS})
+            print("qBittorrent: WebUI credentials synced from apps-admin secret", flush=True)
         else:
-            print("qBittorrent: no qbittorrent-auth secret - WebUI password left as-is", flush=True)
+            print("qBittorrent: no apps-admin secret - WebUI password left as-is", flush=True)
 
         # Keep the category labels (Radarr/Sonarr identify downloads by them) but
         # point both at the flat complete dir - no per-category subfolders.
@@ -225,8 +237,8 @@ data:
                 {"name": "port",            "value": 8080},
                 {"name": "useSsl",          "value": False},
                 {"name": "urlBase",         "value": ""},
-                {"name": "username",        "value": QB_USER},
-                {"name": "password",        "value": QB_PASS},
+                {"name": "username",        "value": ADMIN_USER},
+                {"name": "password",        "value": ADMIN_PASS},
                 {"name": cat_field,         "value": "radarr" if is_radarr else "sonarr"},
                 {"name": prio_field,        "value": 0},
                 {"name": prio_field2,       "value": 0},
@@ -243,6 +255,23 @@ data:
             delete(f"{base_url}/api/v3/downloadclient/{existing['id']}", api_key)
         post(f"{base_url}/api/v3/downloadclient", api_key, payload)
         print(f"{app}: qBittorrent download client {'updated' if existing else 'added'}", flush=True)
+
+    def configure_arr_auth(base_url, api_key, app, ver="v3"):
+        # Enforce forms login with the shared admin account. API-key access (this
+        # script, Prowlarr sync, Bazarr, Homarr integrations) is unaffected.
+        if not (ADMIN_USER and ADMIN_PASS):
+            print(f"{app}: no apps-admin secret - leaving authentication as-is", flush=True)
+            return
+        cfg = get(f"{base_url}/api/{ver}/config/host", api_key)
+        cfg.update({
+            "authenticationMethod": "forms",
+            "authenticationRequired": "enabled",
+            "username": ADMIN_USER,
+            "password": ADMIN_PASS,
+            "passwordConfirmation": ADMIN_PASS,
+        })
+        put(f"{base_url}/api/{ver}/config/host/{cfg['id']}", api_key, cfg)
+        print(f"{app}: forms login enforced for '{ADMIN_USER}'", flush=True)
 
     def add_flaresolverr(prowlarr_key):
         proxies = get(f"{PROWLARR_URL}/api/v1/indexerproxy", prowlarr_key)
@@ -313,12 +342,47 @@ data:
             "settings-radarr-ssl":      "false",
             "settings-radarr-apikey":   radarr_key,
         }
+        if ADMIN_USER and ADMIN_PASS:
+            # Bazarr MD5-hashes the posted password server-side (app/config.py).
+            settings.update({
+                "settings-auth-type":     "form",
+                "settings-auth-username": ADMIN_USER,
+                "settings-auth-password": ADMIN_PASS,
+            })
         data = urllib.parse.urlencode(settings).encode()
         req = urllib.request.Request(f"{BAZARR_URL}/api/system/settings", data=data, method="POST",
             headers={"X-API-KEY": bazarr_key, "Content-Type": "application/x-www-form-urlencoded"})
         with urllib.request.urlopen(req, timeout=30):
             pass
         print("Bazarr: Radarr and Sonarr connections configured", flush=True)
+
+    # ── Jellyfin ──────────────────────────────────────────────────────────────
+
+    def sync_jellyfin_admin():
+        # Ensure the shared admin account exists in Jellyfin with the shared
+        # password. Seerr signs in with Jellyfin, so this covers it too.
+        base = SVC["jellyfin"]
+
+        def jf(method, path, payload=None):
+            data = json.dumps(payload).encode() if payload is not None else None
+            req = urllib.request.Request(f"{base}{path}", data=data, method=method,
+                headers={"X-Emby-Token": JELLYFIN_API_KEY, "Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=30) as r:
+                content = r.read()
+                return json.loads(content) if content else None
+
+        users = jf("GET", "/Users")
+        user = next((u for u in users if u["Name"].lower() == ADMIN_USER.lower()), None)
+        if user is None:
+            user = jf("POST", "/Users/New", {"Name": ADMIN_USER, "Password": ADMIN_PASS})
+            policy = user.get("Policy", {})
+            policy["IsAdministrator"] = True
+            policy["EnableAllFolders"] = True
+            jf("POST", f"/Users/{user['Id']}/Policy", policy)
+            print(f"Jellyfin: admin user '{ADMIN_USER}' created", flush=True)
+        else:
+            jf("POST", f"/Users/{user['Id']}/Password", {"NewPw": ADMIN_PASS, "ResetPassword": False})
+            print(f"Jellyfin: password synced for '{user['Name']}'", flush=True)
 
     # ── Homarr ────────────────────────────────────────────────────────────────
     # REST (OpenAPI) endpoints are used where they exist; integrations are only
@@ -391,11 +455,11 @@ data:
             "bazarr":   ("Bazarr",   SVC["bazarr"],   [{"kind": "apiKey", "value": keys["bazarr"]}]),
             "seerr":    ("Seerr",    SVC["seerr"],    [{"kind": "apiKey", "value": keys["seerr"]}]),
         }
-        if QB_USER and QB_PASS:
+        if ADMIN_USER and ADMIN_PASS:
             wanted["qBittorrent"] = ("qBittorrent", SVC["qbittorrent"],
-                [{"kind": "username", "value": QB_USER}, {"kind": "password", "value": QB_PASS}])
+                [{"kind": "username", "value": ADMIN_USER}, {"kind": "password", "value": ADMIN_PASS}])
         else:
-            print("Homarr: skipping qBittorrent integration (no qbittorrent-auth secret)", flush=True)
+            print("Homarr: skipping qBittorrent integration (no apps-admin secret)", flush=True)
         if JELLYFIN_API_KEY:
             wanted["jellyfin"] = ("Jellyfin", SVC["jellyfin"],
                 [{"kind": "apiKey", "value": JELLYFIN_API_KEY}])
@@ -405,7 +469,19 @@ data:
         existing = {i["kind"]: i["id"] for i in homarr_trpc_query("integration.all")}
         for kind, (name, url, secrets) in wanted.items():
             if kind in existing:
-                print(f"Homarr: integration '{name}' already exists", flush=True)
+                if kind == "qBittorrent":
+                    # Credential-based integration: re-assert the shared admin
+                    # credentials so a password rotation propagates to Homarr.
+                    try:
+                        homarr_trpc_mutation("integration.update", {
+                            "id": existing[kind], "name": name, "url": url,
+                            "secrets": secrets, "appId": app_ids.get(name),
+                        })
+                        print(f"Homarr: integration '{name}' credentials synced", flush=True)
+                    except Exception as e:
+                        print(f"Homarr: integration '{name}' credential sync failed ({e})", flush=True)
+                else:
+                    print(f"Homarr: integration '{name}' already exists", flush=True)
                 continue
             payload = {
                 "name": name, "url": url, "kind": kind, "secrets": secrets,
@@ -472,6 +548,9 @@ data:
     wait_ready(PROWLARR_URL, keys["prowlarr"], "Prowlarr", "v1")
 
     configure_qbittorrent()
+    configure_arr_auth(RADARR_URL,   keys["radarr"],   "Radarr")
+    configure_arr_auth(SONARR_URL,   keys["sonarr"],   "Sonarr")
+    configure_arr_auth(PROWLARR_URL, keys["prowlarr"], "Prowlarr", "v1")
     add_root_folder(RADARR_URL, keys["radarr"], "Radarr", "/data/library/movies")
     add_root_folder(SONARR_URL, keys["sonarr"], "Sonarr", "/data/library/tv")
     add_qbittorrent_client(RADARR_URL, keys["radarr"], "Radarr")
@@ -484,6 +563,14 @@ data:
         configure_bazarr(keys["bazarr"], keys["radarr"], keys["sonarr"])
     except Exception as e:
         print(f"Bazarr: wiring failed ({type(e).__name__}: {e}) - configure manually if needed", flush=True)
+
+    if ADMIN_USER and ADMIN_PASS and JELLYFIN_API_KEY:
+        try:
+            sync_jellyfin_admin()
+        except Exception as e:
+            print(f"Jellyfin: admin sync failed ({type(e).__name__}: {e}) - configure manually if needed", flush=True)
+    else:
+        print("Jellyfin: admin sync skipped (needs apps-admin secret and JELLYFIN_API_KEY)", flush=True)
 
     if HOMARR_API_KEY:
         # A failure here must not crash-loop the pod and re-run the arr wiring

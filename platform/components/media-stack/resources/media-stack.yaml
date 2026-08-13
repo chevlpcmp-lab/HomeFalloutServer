@@ -223,12 +223,12 @@ spec:
             runAsGroup: 1000
           env:
             - { name: TZ, value: America/Toronto }
-            - name: QB_USER
+            - name: ADMIN_USER
               valueFrom:
-                secretKeyRef: { name: qbittorrent-auth, key: WEBUI_USERNAME, optional: true }
-            - name: QB_PASS
+                secretKeyRef: { name: apps-admin, key: USERNAME, optional: true }
+            - name: ADMIN_PASS
               valueFrom:
-                secretKeyRef: { name: qbittorrent-auth, key: WEBUI_PASSWORD, optional: true }
+                secretKeyRef: { name: apps-admin, key: PASSWORD, optional: true }
             - name: HOMARR_API_KEY
               valueFrom:
                 secretKeyRef: { name: homarr-secrets, key: HOMARR_API_KEY, optional: true }
