@@ -72,6 +72,7 @@ Jellyfin refreshes after imports and renames.
 
 Bazarr checks wanted movies and episodes every six hours, searches providers concurrently, uses
 adaptive searching to preserve provider quotas, and upgrades young subtitle matches for seven days.
+Automatic downloads retain Bazarr's conservative score floors of 90 for episodes and 70 for movies.
 Downloaded sidecars are UTF-8, mode `0664`, and stored beside the media so Jellyfin sees them. Usable
 embedded subtitle tracks count as present. YIFY covers movies particularly well, Gestdown covers TV,
 Sous-Titres.eu improves French coverage, and SubF2M is the general fallback. An OpenSubtitles.com or
