@@ -411,14 +411,23 @@ data:
         # the whole set, so existing profiles are fetched and merged, not clobbered.
         profiles = json_request("GET", f"{BAZARR_URL}/api/system/languages/profiles",
             headers={"X-API-KEY": bazarr_key})
+        # Bazarr 1.6 expects both audio flags on every language item. Its startup
+        # migration adds audio_only_include to older rows, but this bootstrap runs
+        # afterward and can replace the row through the settings API. Normalize
+        # every retained profile so reruns also repair profiles created by an
+        # earlier version of this script.
+        for existing_profile in profiles:
+            for item in existing_profile.get("items", []):
+                item.setdefault("audio_exclude", "False")
+                item.setdefault("audio_only_include", "False")
         profile = next((p for p in profiles if p.get("name") == "English + French"), None)
         if profile is None:
             profile = {
                 "profileId": max([p.get("profileId", 0) for p in profiles], default=0) + 1,
                 "name": "English + French",
                 "items": [
-                    {"id": 1, "language": "en", "audio_exclude": "False", "hi": "False", "forced": "False"},
-                    {"id": 2, "language": "fr", "audio_exclude": "False", "hi": "False", "forced": "False"},
+                    {"id": 1, "language": "en", "audio_exclude": "False", "audio_only_include": "False", "hi": "False", "forced": "False"},
+                    {"id": 2, "language": "fr", "audio_exclude": "False", "audio_only_include": "False", "hi": "False", "forced": "False"},
                 ],
                 "cutoff": None,
                 "mustContain": [],
