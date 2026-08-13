@@ -444,18 +444,30 @@ data:
         initialized = bool(public.get("initialized"))
         jar = http.cookiejar.CookieJar()
         opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
-        login = {"username": ADMIN_USER, "password": ADMIN_PASS}
-        if not initialized:
-            # The initial login creates Seerr's administrator and its own Jellyfin
-            # API token. The hostname field is a bare host; Seerr adds the scheme.
+        login = {
+            "username": ADMIN_USER,
+            "password": ADMIN_PASS,
+            "serverType": 2,  # MediaServerType.JELLYFIN
+        }
+        try:
+            # A half-finished wizard may already have saved the Jellyfin host even
+            # while public.initialized is false. In that case Seerr rejects a new
+            # hostname, but the normal login completes the administrator session.
+            json_request("POST", f"{SEERR_URL}/api/v1/auth/jellyfin", login, opener=opener)
+        except urllib.error.HTTPError:
+            if initialized:
+                raise
+            jar = http.cookiejar.CookieJar()
+            opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+            # A genuinely fresh instance needs the connection on its first login.
+            # The hostname is a bare host; Seerr adds the scheme itself.
             login.update({
                 "hostname": "jellyfin.media.svc.cluster.local",
                 "port": 8096,
                 "useSsl": False,
                 "urlBase": "",
-                "serverType": 2,  # MediaServerType.JELLYFIN
             })
-        json_request("POST", f"{SEERR_URL}/api/v1/auth/jellyfin", login, opener=opener)
+            json_request("POST", f"{SEERR_URL}/api/v1/auth/jellyfin", login, opener=opener)
         print("Seerr: authenticated with the shared Jellyfin administrator", flush=True)
 
         # Refresh the Jellyfin library list and enable movie/TV libraries. This is
