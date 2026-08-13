@@ -68,7 +68,7 @@ Jellyfin refreshes after imports and renames.
 | Maintainerr **Settings** | Jellyfin, Radarr, Sonarr, Seerr, and qBittorrent |
 | Bazarr **Settings > Languages** | English and French enabled; `English + French` profile set as the series and movie default (both languages are downloaded - Bazarr has no separate Quebec French) |
 | Bazarr **Settings > Providers** | YIFY Subtitles, Gestdown, Sous-Titres.eu, and SubF2M; all four work without stored third-party credentials |
-| Bazarr **Settings > Jellyfin** | Enabled, pointed at Jellyfin with the shared API key |
+| Bazarr **Settings > Jellyfin** | Enabled with the shared API key, immediate refresh, and the Movies/TV Shows library names and IDs selected |
 
 Bazarr checks wanted movies and episodes every six hours, searches providers concurrently, uses
 adaptive searching to preserve provider quotas, and upgrades young subtitle matches for seven days.

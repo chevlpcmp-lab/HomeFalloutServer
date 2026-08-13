@@ -436,6 +436,20 @@ data:
             }
             profiles = profiles + [profile]
 
+        jellyfin_movie_libraries = []
+        jellyfin_series_libraries = []
+        if JELLYFIN_API_KEY:
+            folders = json_request("GET", f"{SVC['jellyfin']}/Library/VirtualFolders",
+                headers={"X-Emby-Token": JELLYFIN_API_KEY})
+            for folder in folders:
+                library = (folder.get("Name"), folder.get("ItemId"))
+                if not all(library):
+                    continue
+                if (folder.get("CollectionType") or "").lower() == "movies":
+                    jellyfin_movie_libraries.append(library)
+                elif (folder.get("CollectionType") or "").lower() == "tvshows":
+                    jellyfin_series_libraries.append(library)
+
         form = [
             # Credential-free English/French providers. Keep this list explicit:
             # posting enabled_providers replaces the complete provider set.
@@ -514,6 +528,16 @@ data:
                 ("settings-jellyfin-update_series_library", "true"),
                 ("settings-jellyfin-refresh_method", "immediate"),
             ]
+            for name, library_id in jellyfin_movie_libraries:
+                form += [
+                    ("settings-jellyfin-movie_library", name),
+                    ("settings-jellyfin-movie_library_ids", library_id),
+                ]
+            for name, library_id in jellyfin_series_libraries:
+                form += [
+                    ("settings-jellyfin-series_library", name),
+                    ("settings-jellyfin-series_library_ids", library_id),
+                ]
         else:
             print("Bazarr: Jellyfin connection skipped (JELLYFIN_API_KEY not set)", flush=True)
 
@@ -942,11 +966,6 @@ data:
     add_jellyfin_notification(RADARR_URL, keys["radarr"], "Radarr")
     add_jellyfin_notification(SONARR_URL, keys["sonarr"], "Sonarr")
 
-    try:
-        configure_bazarr(keys["bazarr"], keys["radarr"], keys["sonarr"])
-    except Exception as e:
-        print(f"Bazarr: wiring failed ({type(e).__name__}: {e}) - configure manually if needed", flush=True)
-
     if ADMIN_USER and ADMIN_PASS and JELLYFIN_API_KEY:
         try:
             sync_jellyfin_admin()
@@ -956,6 +975,13 @@ data:
         print("Jellyfin: admin sync skipped (needs apps-admin secret and JELLYFIN_API_KEY)", flush=True)
 
     configure_jellyfin_libraries()
+
+    # Jellyfin libraries must exist before Bazarr can persist their names and IDs
+    # for item-level refresh after a subtitle download.
+    try:
+        configure_bazarr(keys["bazarr"], keys["radarr"], keys["sonarr"])
+    except Exception as e:
+        print(f"Bazarr: wiring failed ({type(e).__name__}: {e}) - configure manually if needed", flush=True)
 
     # Seerr's own API key cannot administer its settings. Log in with the shared
     # Jellyfin admin to complete first-run setup and reconcile its Arr instances.
