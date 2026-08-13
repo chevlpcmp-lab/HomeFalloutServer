@@ -16,6 +16,7 @@ it when the gremlins arrive.
 | Understand disks, PVCs, capacity, or Longhorn | [Storage](storage.md) |
 | Create, rotate, audit, or recover secrets | [Secret management](secrets.md) |
 | Finish the app integrations | [First-run application wiring](configuration.md) |
+| Enable private remote access | [Tailscale subnet router](tailscale.md) |
 | Prepare a fresh Proxmox host | [Proxmox prerequisites](proxmox-prerequisites.md) |
 
 ## System card
@@ -28,11 +29,12 @@ it when the gremlins arrive.
 | Kubernetes | k3s, one server and two agents |
 | Node addresses | `10.0.0.10`, `.11`, `.12` |
 | LoadBalancer ranges | `10.0.0.200-229`, `10.0.0.230-250` |
+| Argo CD UI | `http://10.0.0.200` on the LAN |
 | Pod / service CIDRs | `10.42.0.0/16`, `10.43.0.0/16` |
 | GitOps root | `homefallout-root` in `argocd` |
 | Persistent config | Node-local PVCs on Proxmox `local` |
 | Bulk data | 600 GB disk on `local-lvm`, mounted at `/mnt/data` |
-| Remote access model | LAN-only; no public ingress or port forwarding |
+| Remote access model | LAN-only now; Tailscale subnet router staged but disabled |
 
 ## Source-of-truth boundaries
 

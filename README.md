@@ -29,6 +29,7 @@ and Argo CD continuously reconciles the platform and applications from Git.
 | Networking | MetalLB in L2 mode | Gives LAN-friendly addresses to services |
 | GitOps | Argo CD | Self-heals the cluster from this repository |
 | Secrets | Bitnami Sealed Secrets | Keeps only encrypted application secrets in Git |
+| Remote access | Tailscale subnet router (staged) | Optional private access without router ports |
 | Workloads | Jellyfin, Immich, Homarr, and the VPN media stack | Streams, stores, requests, and automates media |
 
 ```mermaid
@@ -81,6 +82,7 @@ exposure, or TLS termination.
 
 | Address | Service | Purpose | Egress |
 | --- | --- | --- | --- |
+| [`10.0.0.200`](http://10.0.0.200) | Argo CD | GitOps UI and API | Direct LAN |
 | [`10.0.0.220`](http://10.0.0.220) | Homarr | Dashboard and integrations | Direct LAN |
 | [`10.0.0.230:8096`](http://10.0.0.230:8096) | Jellyfin | Media streaming | Direct LAN |
 | [`10.0.0.231`](http://10.0.0.231) | Radarr | Movie automation | Gluetun VPN |
@@ -173,6 +175,7 @@ router prerequisites as well as verification and safe rerun instructions.
 | [Storage](docs/storage.md) | You need PVC, disk, capacity, Longhorn, or upgrade details |
 | [Secrets](docs/secrets.md) | You are sealing, rotating, auditing, or recovering credentials |
 | [Application wiring](docs/configuration.md) | You are finishing Homarr/Jellyfin setup or checking the bootstrap sidecar |
+| [Tailscale](docs/tailscale.md) | You want to enable private remote access and optional exit-node routing |
 | [Proxmox prerequisites](docs/proxmox-prerequisites.md) | You need the API role, storage flags, or address reservations |
 
 ## Repository map

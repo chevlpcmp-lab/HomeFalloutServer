@@ -14,6 +14,30 @@ paths = ['''^platform/components/(media-stack|immich)/resources/sealed-secret-.*
 regexes = ['''^\s+(WIREGUARD_PRIVATE_KEY|DB_PASSWORD):\s+Ag[A-Za-z0-9+/=_-]{100,}\s*$''']
 
 [[allowlists]]
+description = "Homarr cluster-sealed ciphertext fields"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = ['''^platform/components/homarr/resources/sealed-secret-homarr-secrets\.yaml$''']
+regexes = ['''^\s+(SECRET_ENCRYPTION_KEY|HOMARR_API_KEY|JELLYFIN_API_KEY):\s+Ag[A-Za-z0-9+/=_-]{100,}\s*$''']
+
+[[allowlists]]
+description = "qBittorrent cluster-sealed ciphertext fields"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = ['''^platform/components/media-stack/resources/sealed-secret-qbittorrent-auth\.yaml$''']
+regexes = ['''^\s+(WEBUI_USERNAME|WEBUI_PASSWORD):\s+Ag[A-Za-z0-9+/=_-]{100,}\s*$''']
+
+[[allowlists]]
+description = "Tailscale cluster-sealed ciphertext field"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = ['''^platform/components/tailscale/resources/sealed-secret-tailscale-auth\.yaml$''']
+regexes = ['''^\s+TS_AUTHKEY:\s+Ag[A-Za-z0-9+/=_-]{100,}\s*$''']
+
+[[allowlists]]
 description = "Documented non-secret example placeholder"
 targetRules = ["generic-api-key"]
 regexes = ['''^REPLACE_WITH_64_HEX_CHARACTERS$''']

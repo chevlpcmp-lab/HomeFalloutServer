@@ -20,6 +20,7 @@ Healthy means:
 - Workload pods are `Running` or a short-lived job has `Completed`.
 - PVCs are `Bound` to the expected worker.
 - LoadBalancer Services have their requested `10.0.0.x` address.
+- Argo CD's LAN Service answers at `10.0.0.200`.
 
 For a compact resource view:
 
@@ -194,6 +195,8 @@ kills, and Immich ML/Jellyfin concurrency. Practical tuning order:
 | Pod `Pending` | Events, node selector, PVC binding, allocatable memory | Scheduling / storage |
 | Pod `CrashLoopBackOff` | Current and `--previous` container logs, Secret keys, mounts | Application config |
 | LoadBalancer address pending | MetalLB pods, IP pool, requested annotation | Networking |
+| Argo CD LAN UI unavailable | `svc/argocd`, `argocd-server` readiness, address `.200` | GitOps / networking |
+| Tailscale routes unavailable | Component enabled, pod logs, admin-console route approval | Optional remote access |
 | Media pod never becomes ready | Gluetun logs, WireGuard key, provider/country, DNS | VPN secret/network |
 | qBittorrent UI rejects login | `qbittorrent-auth` sealed value and bootstrap logs | Secret / bootstrap |
 | Arr cannot import | Paths match `/data`, permissions are UID/GID 1000, free disk | Storage / app wiring |

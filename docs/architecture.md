@@ -113,6 +113,7 @@ flowchart LR
     Root --> Platform["platform chart"]
     Platform --> N["namespaces · wave 1"]
     Platform --> M["MetalLB · waves 20/21"]
+    Platform --> A["Argo CD LAN service · wave 23"]
     Platform --> S["storage · wave 41"]
     Platform --> SS["Sealed Secrets · wave 60"]
     Platform --> MS["media-stack · wave 81"]
@@ -193,7 +194,8 @@ why the sealing key, databases, config volumes, and irreplaceable photos need of
 ## Deliberate omissions
 
 - **No Longhorn:** there are no independent storage nodes; see [Storage](storage.md).
-- **No ingress or TLS:** stable MetalLB addresses are simpler for a LAN-only lab.
+- **No shared ingress or certificate automation:** stable MetalLB addresses are simpler for a
+  LAN-only lab; most application UIs remain plain HTTP.
 - **No three-node control plane:** the RAM cost does not buy physical availability on one host.
 - **No GPU passthrough yet:** Jellyfin currently transcodes on CPU; Intel iGPU passthrough is a
   future optimization.
@@ -201,3 +203,11 @@ why the sealing key, databases, config volumes, and irreplaceable photos need of
 
 These are current design decisions, not permanent limitations. Add complexity when the hardware
 and operational need justify it.
+
+## Staged remote-access path
+
+The repository includes, but does not currently enable, a Tailscale subnet-router component. Once
+enabled it advertises the LAN, pod CIDR, and service CIDR to authenticated tailnet devices and may
+optionally act as an exit node. This adds private remote reachability without public router ports.
+Its state is persistent and its auth key is already modeled as a SealedSecret. Follow the explicit
+[Tailscale enable runbook](tailscale.md) before uncommenting the component.

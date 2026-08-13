@@ -59,9 +59,12 @@ provisioning/terraform/terraform.tfvars
 platform/secrets/media-secrets.yaml
 platform/secrets/immich-secrets.yaml
 platform/secrets/argocd-repository.yaml
+platform/secrets/tailscale-secrets.yaml
 ```
 
 All are ignored by Git. `platform/secrets/*.example.yaml` documents the schema without live values.
+The Tailscale source is prepared for the staged remote-access component but is unused until that
+component is explicitly enabled.
 
 ## 2. Deploy the stack
 
@@ -170,6 +173,9 @@ Finally, prove qBittorrent shares Gluetun's VPN address using the commands in
 5. Create the first Immich administrator and test an upload.
 
 See [First-run application wiring](configuration.md) for exact paths and commands.
+
+Private remote access is optional and remains disabled after the normal deployment. Follow the
+[Tailscale runbook](tailscale.md) only after the LAN deployment is healthy.
 
 ## Safe reruns and partial runs
 

@@ -25,6 +25,7 @@ inside either MetalLB pool. The `.200-.250` range is reserved even when many add
 
 | Address | Service port | Pod target | Namespace | Route |
 | --- | ---: | ---: | --- | --- |
+| `10.0.0.200` | `80`, `443` | Argo CD server `8080` | `argocd` | Direct |
 | `10.0.0.220` | `80` | Homarr `7575` | `media` | Direct |
 | `10.0.0.230` | `8096` | Jellyfin `8096` | `media` | Direct |
 | `10.0.0.231` | `80` | Radarr `7878` | `media` | VPN pod |
@@ -114,8 +115,10 @@ names such as `jellyfin.home.arpa`, but those records are outside this repositor
 - FlareSolverr and data services do not have LoadBalancer addresses.
 - The Proxmox UI and Kubernetes API should never be forwarded directly to the internet.
 
-For remote access, prefer a separate authenticated overlay such as Tailscale or WireGuard into the
-LAN. Treat public ingress as a separate project with TLS, identity, rate limits, and backups.
+For remote access, the repository stages a Tailscale subnet router that can expose these private
+ranges only to authenticated tailnet devices. It is disabled until its setup and route approvals
+are complete; see [Tailscale remote access](tailscale.md). Treat public ingress as a separate
+project with TLS, identity, rate limits, and backups.
 
 ## Troubleshooting
 
