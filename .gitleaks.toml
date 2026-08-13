@@ -30,6 +30,14 @@ paths = ['''^platform/components/media-stack/resources/sealed-secret-qbittorrent
 regexes = ['''^\s+(WEBUI_USERNAME|WEBUI_PASSWORD):\s+Ag[A-Za-z0-9+/=_-]{100,}\s*$''']
 
 [[allowlists]]
+description = "Shared application admin cluster-sealed ciphertext fields"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = ['''^platform/components/media-stack/resources/sealed-secret-apps-admin\.yaml$''']
+regexes = ['''^\s+(USERNAME|PASSWORD):\s+Ag[A-Za-z0-9+/=_-]{100,}\s*$''']
+
+[[allowlists]]
 description = "Tailscale cluster-sealed ciphertext field"
 targetRules = ["generic-api-key"]
 condition = "AND"
