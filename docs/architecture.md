@@ -207,7 +207,7 @@ and operational need justify it.
 ## Remote-access path
 
 The Tailscale subnet-router component advertises the LAN, pod CIDR, and service CIDR to
-authenticated tailnet devices and may optionally act as an exit node. This adds private remote
+authenticated tailnet devices. It does not advertise an exit node. This adds private remote
 reachability without public router ports. Its state is persistent and its auth key is delivered by
 a SealedSecret. Route approval and verification are documented in the
 [Tailscale runbook](tailscale.md).

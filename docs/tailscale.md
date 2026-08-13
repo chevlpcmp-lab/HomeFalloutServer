@@ -10,8 +10,9 @@ can reach everything as if it were on the LAN, with no ports opened on the route
 | `10.42.0.0/16` | Cluster pod network (debugging) |
 | `10.43.0.0/16` | Cluster Services by ClusterIP (debugging) |
 
-It also advertises itself as an **exit node** (route *all* traffic through home), which is
-optional to approve and use.
+It is intentionally a subnet router only. Exit-node advertising is disabled so the pod does not
+claim default IPv4/IPv6 routes or require IPv6 forwarding. It can be added later as a separate,
+explicit choice.
 
 The component is enabled in `platform/values/values-prod.yaml` and pinned to the apps worker.
 
@@ -29,8 +30,7 @@ The component is enabled in `platform/values/values-prod.yaml` and pinned to the
 
 4. Commit and push the sealed secret. Argo CD deploys the enabled router.
 5. In the admin console, open **Machines**, find `homefallout`, and **approve the
-   advertised subnet routes** (Edit route settings). Approve the exit node too if wanted.
-   Without approval the routes stay inactive.
+   advertised subnet routes** (Edit route settings). Without approval the routes stay inactive.
 6. From a tailnet device off the home network, verify: `http://10.0.0.200` (Argo CD),
    `https://<proxmox-ip>:8006`, `http://10.0.0.220` (Homarr).
 

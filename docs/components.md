@@ -161,9 +161,9 @@ separate lets future upstream manifest refreshes remain untouched.
 
 The Tailscale Deployment advertises `10.0.0.0/24`, `10.42.0.0/16`, and `10.43.0.0/16`
 from a single subnet router. It requests `NET_ADMIN`, mounts `/dev/net/tun`, persists identity in a
-512 Mi retained PVC, and offers optional exit-node routing. Its auth key is sealed in Git. The
-advertised routes and optional exit node must be approved in the Tailscale admin console unless
-tailnet policy auto-approvers already cover them.
+512 Mi retained PVC, and is intentionally not an exit node. Its auth key is sealed in Git. The
+advertised routes must be approved in the Tailscale admin console unless tailnet policy
+auto-approvers already cover them.
 
 ## Image update policy
 

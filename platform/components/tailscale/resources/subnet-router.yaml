@@ -48,9 +48,6 @@ spec:
             # Home LAN (Proxmox, MetalLB addresses, everything), then the cluster
             # pod and service CIDRs so tailnet clients can also hit them directly.
             - { name: TS_ROUTES, value: "10.0.0.0/24,10.42.0.0/16,10.43.0.0/16" }
-            # Also offer to route all internet traffic (exit node); needs its own
-            # approval in the admin console and is optional to use.
-            - { name: TS_EXTRA_ARGS, value: "--advertise-exit-node" }
             - { name: TS_HOSTNAME, value: homefallout }
             - { name: TS_STATE_DIR, value: /var/lib/tailscale }
             # File state on the PVC instead of a kube Secret, and kernel (not
