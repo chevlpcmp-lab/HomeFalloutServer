@@ -12,6 +12,7 @@ every pod restart. It configures:
 | Prowlarr | FlareSolverr | `http://localhost:8191` |
 | Bazarr | Radarr | `http://localhost:7878` |
 | Bazarr | Sonarr | `http://localhost:8989` |
+| Bazarr | Jellyfin | library refresh after subtitle changes, over Service DNS |
 | Radarr / Sonarr | Jellyfin | Emby/Jellyfin library-update notification over Service DNS |
 | Bootstrap | Jellyfin | Movies and TV Shows libraries from `/media/library/movies` and `/media/library/tv` |
 | Seerr | Jellyfin, Radarr, Sonarr | first-run admin, libraries, profiles, and default instances |
@@ -65,6 +66,8 @@ Jellyfin refreshes after imports and renames.
 | Prowlarr **Settings > Indexers > Proxies** | `FlareSolverr` |
 | Seerr **Settings > Services** | Default Radarr and Sonarr instances |
 | Maintainerr **Settings** | Jellyfin, Radarr, Sonarr, Seerr, and qBittorrent |
+| Bazarr **Settings > Languages** | English and French enabled; `English + French` profile set as the series and movie default (both languages are downloaded - Bazarr has no separate Quebec French) |
+| Bazarr **Settings > Jellyfin** | Enabled, pointed at Jellyfin with the shared API key |
 
 Prowlarr cannot infer which external indexer provider you are authorized to use or invent its
 credentials. Add each chosen provider once in Prowlarr. Because the Applications are reconciled to

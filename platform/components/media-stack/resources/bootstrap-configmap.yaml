@@ -404,33 +404,78 @@ data:
         else:
             raise RuntimeError("Bazarr not ready after 10 minutes")
         print("Bazarr ready", flush=True)
-        settings = {
-            "settings-general-use_sonarr": "true",
-            "settings-sonarr-ip":       "localhost",
-            "settings-sonarr-port":     "8989",
-            "settings-sonarr-base_url": "/",
-            "settings-sonarr-ssl":      "false",
-            "settings-sonarr-apikey":   sonarr_key,
-            "settings-general-use_radarr": "true",
-            "settings-radarr-ip":       "localhost",
-            "settings-radarr-port":     "7878",
-            "settings-radarr-base_url": "/",
-            "settings-radarr-ssl":      "false",
-            "settings-radarr-apikey":   radarr_key,
-        }
+
+        # Subtitle languages: English + French, both downloaded for every item
+        # (no cutoff). Bazarr has no separate Quebec French - subtitle providers
+        # tag French subtitles as plain 'fr'. Posting languages-profiles REPLACES
+        # the whole set, so existing profiles are fetched and merged, not clobbered.
+        profiles = json_request("GET", f"{BAZARR_URL}/api/system/languages/profiles",
+            headers={"X-API-KEY": bazarr_key})
+        profile = next((p for p in profiles if p.get("name") == "English + French"), None)
+        if profile is None:
+            profile = {
+                "profileId": max([p.get("profileId", 0) for p in profiles], default=0) + 1,
+                "name": "English + French",
+                "items": [
+                    {"id": 1, "language": "en", "audio_exclude": "False", "hi": "False", "forced": "False"},
+                    {"id": 2, "language": "fr", "audio_exclude": "False", "hi": "False", "forced": "False"},
+                ],
+                "cutoff": None,
+                "mustContain": [],
+                "mustNotContain": [],
+                "originalFormat": None,
+            }
+            profiles = profiles + [profile]
+
+        form = [
+            ("settings-general-use_sonarr", "true"),
+            ("settings-sonarr-ip",       "localhost"),
+            ("settings-sonarr-port",     "8989"),
+            ("settings-sonarr-base_url", "/"),
+            ("settings-sonarr-ssl",      "false"),
+            ("settings-sonarr-apikey",   sonarr_key),
+            ("settings-general-use_radarr", "true"),
+            ("settings-radarr-ip",       "localhost"),
+            ("settings-radarr-port",     "7878"),
+            ("settings-radarr-base_url", "/"),
+            ("settings-radarr-ssl",      "false"),
+            ("settings-radarr-apikey",   radarr_key),
+            # Repeated key = the full list of enabled languages.
+            ("languages-enabled", "en"),
+            ("languages-enabled", "fr"),
+            ("languages-profiles", json.dumps(profiles)),
+            # New shows and movies pick up the profile automatically.
+            ("settings-general-serie_default_enabled", "true"),
+            ("settings-general-serie_default_profile", str(profile["profileId"])),
+            ("settings-general-movie_default_enabled", "true"),
+            ("settings-general-movie_default_profile", str(profile["profileId"])),
+        ]
         if ADMIN_USER and ADMIN_PASS:
             # Bazarr MD5-hashes the posted password server-side (app/config.py).
-            settings.update({
-                "settings-auth-type":     "form",
-                "settings-auth-username": ADMIN_USER,
-                "settings-auth-password": ADMIN_PASS,
-            })
-        data = urllib.parse.urlencode(settings).encode()
+            form += [
+                ("settings-auth-type",     "form"),
+                ("settings-auth-username", ADMIN_USER),
+                ("settings-auth-password", ADMIN_PASS),
+            ]
+        if JELLYFIN_API_KEY:
+            form += [
+                ("settings-general-use_jellyfin", "true"),
+                ("settings-jellyfin-url",    SVC["jellyfin"]),
+                ("settings-jellyfin-apikey", JELLYFIN_API_KEY),
+                ("settings-jellyfin-update_movie_library",  "true"),
+                ("settings-jellyfin-update_series_library", "true"),
+                ("settings-jellyfin-refresh_method", "immediate"),
+            ]
+        else:
+            print("Bazarr: Jellyfin connection skipped (JELLYFIN_API_KEY not set)", flush=True)
+
+        data = urllib.parse.urlencode(form).encode()
         req = urllib.request.Request(f"{BAZARR_URL}/api/system/settings", data=data, method="POST",
             headers={"X-API-KEY": bazarr_key, "Content-Type": "application/x-www-form-urlencoded"})
-        with urllib.request.urlopen(req, timeout=30):
+        # Saving language profiles triggers a synchronous missing-subtitles scan.
+        with urllib.request.urlopen(req, timeout=180):
             pass
-        print("Bazarr: Radarr and Sonarr connections configured", flush=True)
+        print("Bazarr: Radarr/Sonarr connections, English+French languages, and Jellyfin configured", flush=True)
 
     # ── Seerr ────────────────────────────────────────────────────────────────
 
