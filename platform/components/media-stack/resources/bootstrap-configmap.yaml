@@ -437,6 +437,38 @@ data:
             profiles = profiles + [profile]
 
         form = [
+            # Credential-free English/French providers. Keep this list explicit:
+            # posting enabled_providers replaces the complete provider set.
+            ("settings-general-enabled_providers", "yifysubtitles"),
+            ("settings-general-enabled_providers", "gestdown"),
+            ("settings-general-enabled_providers", "soustitreseu"),
+            ("settings-general-enabled_providers", "subf2m"),
+            ("settings-subf2m-user_agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36"),
+            ("settings-subf2m-verify_ssl", "true"),
+            # Search/download policy: conserve provider quotas while still checking
+            # wanted items four times daily and improving young subtitles for a week.
+            ("settings-general-multithreading", "true"),
+            ("settings-general-concurrent_jobs", "4"),
+            ("settings-general-adaptive_searching", "true"),
+            ("settings-general-adaptive_searching_delay", "3w"),
+            ("settings-general-adaptive_searching_delta", "1w"),
+            ("settings-general-wanted_search_frequency", "6"),
+            ("settings-general-wanted_search_frequency_movie", "6"),
+            ("settings-general-upgrade_subs", "true"),
+            ("settings-general-upgrade_frequency", "12"),
+            ("settings-general-days_to_upgrade_subs", "7"),
+            # Treat usable embedded tracks as present, but otherwise write portable,
+            # Jellyfin-readable UTF-8 sidecar files alongside the media.
+            ("settings-general-use_embedded_subs", "true"),
+            ("settings-general-embedded_subs_show_desired", "true"),
+            ("settings-general-parse_embedded_audio_track", "true"),
+            ("settings-general-utf8_encode", "true"),
+            ("settings-general-chmod_enabled", "true"),
+            ("settings-general-chmod", "0664"),
+            ("settings-general-subfolder", "current"),
+            ("settings-general-hi_extension", "hi"),
+            ("settings-general-skip_hashing", "false"),
+            ("settings-general-use_scenename", "true"),
             ("settings-general-use_sonarr", "true"),
             ("settings-sonarr-ip",       "localhost"),
             ("settings-sonarr-port",     "8989"),
@@ -484,7 +516,7 @@ data:
         # Saving language profiles triggers a synchronous missing-subtitles scan.
         with urllib.request.urlopen(req, timeout=180):
             pass
-        print("Bazarr: Radarr/Sonarr connections, English+French languages, and Jellyfin configured", flush=True)
+        print("Bazarr: providers, search policy, Radarr/Sonarr, English+French, and Jellyfin configured", flush=True)
 
     # ── Seerr ────────────────────────────────────────────────────────────────
 

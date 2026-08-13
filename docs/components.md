@@ -74,7 +74,8 @@ The bootstrap helper continuously and idempotently configures:
 - `/data/library/movies` and `/data/library/tv` as Arr root folders.
 - Radarr and Sonarr as Prowlarr applications.
 - FlareSolverr as Prowlarr's proxy.
-- Radarr and Sonarr connections in Bazarr.
+- Bazarr's credential-free English/French providers, language profile, search policy, and
+  Radarr/Sonarr/Jellyfin connections.
 - Jellyfin library-update notifications in Radarr and Sonarr.
 - Jellyfin Movies and TV Shows libraries backed by the shared read-only media mount.
 - Seerr's Jellyfin admin, enabled libraries, and default Radarr/Sonarr instances.

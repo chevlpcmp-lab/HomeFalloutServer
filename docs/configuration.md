@@ -67,7 +67,16 @@ Jellyfin refreshes after imports and renames.
 | Seerr **Settings > Services** | Default Radarr and Sonarr instances |
 | Maintainerr **Settings** | Jellyfin, Radarr, Sonarr, Seerr, and qBittorrent |
 | Bazarr **Settings > Languages** | English and French enabled; `English + French` profile set as the series and movie default (both languages are downloaded - Bazarr has no separate Quebec French) |
+| Bazarr **Settings > Providers** | YIFY Subtitles, Gestdown, Sous-Titres.eu, and SubF2M; all four work without stored third-party credentials |
 | Bazarr **Settings > Jellyfin** | Enabled, pointed at Jellyfin with the shared API key |
+
+Bazarr checks wanted movies and episodes every six hours, searches providers concurrently, uses
+adaptive searching to preserve provider quotas, and upgrades young subtitle matches for seven days.
+Downloaded sidecars are UTF-8, mode `0664`, and stored beside the media so Jellyfin sees them. Usable
+embedded subtitle tracks count as present. YIFY covers movies particularly well, Gestdown covers TV,
+Sous-Titres.eu improves French coverage, and SubF2M is the general fallback. An OpenSubtitles.com or
+SubDL account can be added later for broader coverage, but neither credential is required for the
+deployed baseline.
 
 Prowlarr cannot infer which external indexer provider you are authorized to use or invent its
 credentials. Add each chosen provider once in Prowlarr. Because the Applications are reconciled to
