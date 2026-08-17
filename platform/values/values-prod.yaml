@@ -108,3 +108,11 @@ components:
     project: applications
     resources:
       enabled: true
+
+  - name: komga
+    tier: apps
+    waveOffset: 8
+    namespace: media
+    project: applications
+    resources:
+      enabled: true

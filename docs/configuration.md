@@ -18,14 +18,17 @@ Git-owned bootstrap is loaded automatically without a manual rollout. It configu
 | Bootstrap | Jellyfin | Movies and TV Shows libraries from `/media/library/movies` and `/media/library/tv` |
 | Seerr | Jellyfin, Radarr, Sonarr | first-run admin, libraries, profiles, and default instances |
 | Maintainerr | Jellyfin, Radarr, Sonarr, Seerr, qBittorrent | cleanup-engine service configuration |
+| Prowlarr | Mylar | full-sync Application using `http://localhost:8090`; comic-capable indexers propagate |
+| Bootstrap | Komga | first-run admin claim and the `Comics` library, over Service DNS |
 | Homarr | everything | Service DNS, for example `http://radarr.media.svc.cluster.local` |
 
 It also creates the shared paths and sets them in qBittorrent and the Arr applications:
 
 - qBittorrent incomplete: `/data/downloads/incomplete`
-- qBittorrent complete: `/data/downloads/complete`
+- qBittorrent complete: `/data/downloads/complete` (`comics/` subfolder for the Mylar category)
 - Radarr root: `/data/library/movies`
 - Sonarr root: `/data/library/tv`
+- Mylar root: `/data/library/comics`, plus `/data/downloads/ddl` for GetComics direct downloads
 
 ## Git-owned application desired state
 
@@ -86,7 +89,7 @@ Jellyfin refreshes after imports and renames.
 | Radarr / Sonarr **Settings > Download Clients** | `qBittorrent` |
 | Radarr / Sonarr **Settings > Indexers** | Indexers synchronized from Prowlarr |
 | Radarr / Sonarr **Settings > Connect** | `Jellyfin` library-update connection |
-| Prowlarr **Settings > Apps** | `Radarr` and `Sonarr`, both set to Full Sync |
+| Prowlarr **Settings > Apps** | `Radarr`, `Sonarr`, and `Mylar`, all set to Full Sync |
 | Prowlarr **Settings > Indexers** | EZTV, LimeTorrents, Nyaa.si, and YTS |
 | Prowlarr **Settings > Indexers > Proxies** | `FlareSolverr` |
 | Seerr **Settings > Services** | Default Radarr and Sonarr instances |
@@ -110,6 +113,36 @@ reconciled to Full Sync, Prowlarr publishes them to Radarr and Sonarr automatica
 available to compatible indexers. Private trackers and providers requiring accounts remain an
 intentional manual extension unless their credentials are added through a SealedSecret and their
 non-secret schema is added to the bootstrap.
+
+## Comics: Mylar and Komga
+
+Comics follow the same request-once model as movies and TV, with Mylar's own search page as the
+request surface. The pipeline needs one credential: a free ComicVine API key in the `comicvine`
+SealedSecret (`prepare-workstation.ps1` prompts for it; reseal after filling it in). Without it,
+Mylar starts but every search and pull-list refresh fails.
+
+Mylar has no settings API, so a `configure-mylar` init container asserts its Git-owned `config.ini`
+before the app starts: ComicVine key, qBittorrent client with the `comics` category, the
+`/data/library/comics` root, hardlink post-processing with a folder monitor on
+`/data/downloads/complete/comics`, GetComics direct downloads through FlareSolverr, ComicTagger
+metatagging (`ComicInfo.xml`), and `series.json` metadata that Komga imports. Edit those values in
+`media-stack.yaml`, not the Mylar UI - UI changes to Git-owned keys revert on the next pod restart.
+
+Day-to-day flow:
+
+1. Search a series in Mylar (`http://10.0.0.238`) and add it. New and upcoming issues are wanted
+   automatically, and the weekly pull-list grabs each new issue the week it ships.
+2. For back-catalog, open the series and mark the issues (or **Want All**) - back issues are not
+   auto-wanted on add so that adding a 800-issue run stays a deliberate choice.
+3. Downloads arrive via Prowlarr-synced indexers (category `7030`) or GetComics, import into
+   `/data/library/comics` as tagged `.cbz`, and Komga (`http://10.0.0.239:25600`) picks them up on
+   its hourly scan - trigger **Scan library files** in Komga to see a new import immediately.
+4. Read in Komga's web reader, or point Mihon/Panels/Chunky at the OPDS feed
+   (`http://10.0.0.239:25600/opds/v1.2`) with the Komga admin (`<apps-admin username>@homefallout.local`).
+
+Expect popular and current series to feel as automatic as Sonarr; deep back-catalog of obscure runs
+has thinner indexer coverage, and Mylar keeps retrying wanted issues on its search schedule until
+they fill.
 
 ## Homarr dashboard provisioning
 

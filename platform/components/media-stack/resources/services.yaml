@@ -80,6 +80,17 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
+  name: mylar
+  namespace: media
+  annotations: { metallb.io/loadBalancerIPs: "10.0.0.238" }
+spec:
+  type: LoadBalancer
+  selector: { app: media-stack }
+  ports: [{ name: http, port: 80, targetPort: 8090 }]
+---
+apiVersion: v1
+kind: Service
+metadata:
   name: flaresolverr
   namespace: media
 spec:

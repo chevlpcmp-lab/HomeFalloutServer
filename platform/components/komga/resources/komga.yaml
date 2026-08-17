@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: komga-config
+  namespace: media
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: config-local-retain
+  resources: { requests: { storage: 1Gi } }
+---
+# Komga serves the comic library Mylar builds. Like Jellyfin, it consumes the
+# media only: it runs outside the VPN pod and mounts the library read-only.
+# First-run admin and the Comics library are provisioned by the media-stack
+# bootstrap over the cluster Service.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: komga
+  namespace: media
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: komga }
+  template:
+    metadata:
+      labels: { app: komga }
+    spec:
+      nodeSelector:
+        homelab.charles/pool: media
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: komga
+          image: gotson/komga:1.26.3
+          env:
+            - { name: TZ, value: America/Toronto }
+            # Cap the JVM below the container limit so the kernel OOM killer
+            # never beats the garbage collector to it.
+            - { name: JAVA_TOOL_OPTIONS, value: "-Xmx1g" }
+          ports:
+            - { name: http, containerPort: 25600 }
+          startupProbe:
+            tcpSocket: { port: 25600 }
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket: { port: 25600 }
+            periodSeconds: 15
+          volumeMounts:
+            - { name: config, mountPath: /config }
+            - { name: media-data, mountPath: /data, readOnly: true }
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: "2", memory: 1536Mi }
+      volumes:
+        - { name: config, persistentVolumeClaim: { claimName: komga-config } }
+        - { name: media-data, persistentVolumeClaim: { claimName: media-data } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: komga
+  namespace: media
+  annotations:
+    metallb.io/loadBalancerIPs: "10.0.0.239"
+spec:
+  type: LoadBalancer
+  selector: { app: komga }
+  ports:
+    - { name: http, port: 25600, targetPort: 25600 }

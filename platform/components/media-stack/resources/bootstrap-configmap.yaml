@@ -10,8 +10,8 @@ data:
     Wires up the media stack after the apps start, then provisions Homarr.
 
     Runs as a sidecar in the media-stack pod, so every VPN-bound app is reachable on
-    localhost and qBittorrent's localhost authentication bypass applies. Homarr and
-    Jellyfin run in other pods and are addressed by Service DNS.
+    localhost and qBittorrent's localhost authentication bypass applies. Homarr,
+    Jellyfin, and Komga run in other pods and are addressed by Service DNS.
 
     Each app's API key is read straight from its config volume, so nothing has to be
     copied into Secrets by hand. Idempotent - skips anything already configured.
@@ -19,7 +19,7 @@ data:
     Homarr provisioning only runs when HOMARR_API_KEY is set (create the admin account,
     then an API key under Management > Tools > API, and reseal homarr-secrets).
     """
-    import http.cookiejar, json, os, re, time, urllib.parse, urllib.request, urllib.error, xml.etree.ElementTree as ET
+    import base64, http.cookiejar, json, os, re, time, urllib.parse, urllib.request, urllib.error, xml.etree.ElementTree as ET
 
     RADARR_URL   = "http://localhost:7878"
     SONARR_URL   = "http://localhost:8989"
@@ -29,6 +29,7 @@ data:
     FLARE_URL    = "http://localhost:8191"
     SEERR_URL    = "http://localhost:5055"
     MAINTAINERR_URL = "http://localhost:6246"
+    MYLAR_URL    = "http://localhost:8090"
 
     HOMARR_URL       = os.environ.get("HOMARR_URL", "http://homarr.media.svc.cluster.local")
     HOMARR_API_KEY   = os.environ.get("HOMARR_API_KEY", "")
@@ -53,6 +54,8 @@ data:
         "bazarr":      "http://10.0.0.235",
         "seerr":       "http://10.0.0.236",
         "maintainerr": "http://10.0.0.237",
+        "mylar":       "http://10.0.0.238",
+        "komga":       "http://10.0.0.239:25600",
         "immich":      "http://10.0.0.240",
     }
     # Cluster-internal URLs Homarr's server uses for its integrations.
@@ -64,8 +67,11 @@ data:
         "qbittorrent": "http://qbittorrent.media.svc.cluster.local",
         "bazarr":      "http://bazarr.media.svc.cluster.local",
         "seerr":       "http://seerr.media.svc.cluster.local",
+        "komga":       "http://komga.media.svc.cluster.local:25600",
     }
-    ICONS = "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons@master"
+    # The icon repo's default branch is main; the old master branch is stale and
+    # is missing newer icons such as mylar.png.
+    ICONS = "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons@main"
 
     # ── generic helpers ───────────────────────────────────────────────────────
 
@@ -112,6 +118,26 @@ data:
                 pass
             time.sleep(5)
         raise RuntimeError(f"Seerr API key not found in {path} after {max_wait}s")
+
+    def read_mylar_key(path, max_wait=600):
+        # The configure-mylar init container guarantees [API] api_key exists in
+        # config.ini before Mylar starts, so this normally succeeds first try.
+        deadline = time.time() + max_wait
+        while time.time() < deadline:
+            try:
+                section = None
+                with open(path) as f:
+                    for line in f:
+                        top = re.match(r"^\[(.+)\]\s*$", line)
+                        if top:
+                            section = top.group(1)
+                        m = re.match(r"^api_key\s*=\s*(\S+)\s*$", line)
+                        if m and section == "API":
+                            return m.group(1)
+            except Exception:
+                pass
+            time.sleep(5)
+        raise RuntimeError(f"Mylar API key not found in {path} after {max_wait}s")
 
     def get(url, api_key):
         req = urllib.request.Request(url, headers={"X-Api-Key": api_key})
@@ -270,7 +296,9 @@ data:
         # Incomplete and complete share the dataset so the completion move is a
         # rename, not a copy. Listen port and interface are owned by Gluetun.
         for d in ["/data/downloads/incomplete", "/data/downloads/complete",
-                  "/data/library/movies", "/data/library/tv"]:
+                  "/data/downloads/complete/comics", "/data/downloads/ddl",
+                  "/data/library/movies", "/data/library/tv",
+                  "/data/library/comics"]:
             os.makedirs(d, exist_ok=True)
         set_prefs({
             "save_path": "/data/downloads/complete",
@@ -289,9 +317,17 @@ data:
             print("qBittorrent: no apps-admin secret - WebUI password left as-is", flush=True)
 
         # Keep the category labels (Radarr/Sonarr identify downloads by them) but
-        # point both at the flat complete dir - no per-category subfolders.
-        for cat in ["radarr", "sonarr"]:
-            form = urllib.parse.urlencode({"category": cat, "savePath": "/data/downloads/complete"}).encode()
+        # point both at the flat complete dir - no per-category subfolders. The
+        # comics category gets its own subfolder because Mylar imports through a
+        # folder monitor rather than download-client tracking, and it must never
+        # scan Radarr/Sonarr payloads.
+        categories = {
+            "radarr": "/data/downloads/complete",
+            "sonarr": "/data/downloads/complete",
+            "comics": "/data/downloads/complete/comics",
+        }
+        for cat, save_path in categories.items():
+            form = urllib.parse.urlencode({"category": cat, "savePath": save_path}).encode()
             try:
                 urllib.request.urlopen(f"{QB_URL}/api/v2/torrents/createCategory", form, timeout=10)
                 print(f"qBittorrent: category '{cat}' created", flush=True)
@@ -1097,6 +1133,73 @@ data:
                 )
             print(f"Maintainerr: retention rule '{payload['name']}' {action}", flush=True)
 
+    # ── Comics: Mylar + Komga ────────────────────────────────────────────────
+    # Mylar's settings live in config.ini and are asserted by the configure-mylar
+    # init container; this side only needs Mylar reachable so Prowlarr's app sync
+    # can push indexers into it. Komga runs in its own pod like Jellyfin.
+
+    def wait_mylar(mylar_key):
+        print("Waiting for Mylar...", flush=True)
+        for _ in range(120):
+            try:
+                req = urllib.request.Request(
+                    f"{MYLAR_URL}/api?apikey={mylar_key}&cmd=getVersion")
+                with urllib.request.urlopen(req, timeout=5) as r:
+                    json.loads(r.read())
+                print("Mylar ready", flush=True)
+                return
+            except Exception:
+                time.sleep(5)
+        raise RuntimeError("Mylar not ready after 10 minutes")
+
+    def configure_komga():
+        if not (ADMIN_USER and ADMIN_PASS):
+            print("Komga: setup skipped (apps-admin credentials not set)", flush=True)
+            return
+        base = SVC["komga"]
+        # Komga accounts are e-mail addresses; derive a stable one from the
+        # shared admin username. Sign in to Komga with this address.
+        email = ADMIN_USER if "@" in ADMIN_USER else f"{ADMIN_USER}@homefallout.local"
+
+        print("Waiting for Komga...", flush=True)
+        claim = None
+        for _ in range(120):
+            try:
+                claim = json_request("GET", f"{base}/api/v1/claim", timeout=5)
+                break
+            except Exception:
+                time.sleep(5)
+        if claim is None:
+            raise RuntimeError("Komga not ready after 10 minutes")
+        print("Komga ready", flush=True)
+
+        if not claim.get("isClaimed"):
+            json_request("POST", f"{base}/api/v1/claim", headers={
+                "X-Komga-Email": email,
+                "X-Komga-Password": ADMIN_PASS,
+            })
+            print(f"Komga: admin '{email}' created from apps-admin", flush=True)
+
+        token = base64.b64encode(f"{email}:{ADMIN_PASS}".encode()).decode()
+        auth = {"Authorization": f"Basic {token}"}
+        libraries = json_request("GET", f"{base}/api/v1/libraries", headers=auth)
+        if any(lib.get("name") == "Comics" for lib in libraries):
+            print("Komga: library 'Comics' already exists", flush=True)
+            return
+        json_request("POST", f"{base}/api/v1/libraries", {
+            "name": "Comics",
+            "root": "/data/library/comics",
+            # Mylar writes ComicInfo.xml (metatagging) and series.json
+            # (series_metadata_local); importing both means covers, series, and
+            # issue metadata appear without any manual curation.
+            "importComicInfoBook": True,
+            "importComicInfoSeries": True,
+            "importMylarSeries": True,
+            "scanOnStartup": True,
+            "scanInterval": "HOURLY",
+        }, headers=auth)
+        print("Komga: library 'Comics' created at /data/library/comics", flush=True)
+
     # ── Jellyfin ──────────────────────────────────────────────────────────────
 
     def configure_jellyfin_libraries():
@@ -1201,6 +1304,8 @@ data:
             "qBittorrent": (f"{ICONS}/svg/qbittorrent.svg", LAN["qbittorrent"], "Torrent client"),
             "Bazarr":      (f"{ICONS}/svg/bazarr.svg",      LAN["bazarr"],      "Subtitles"),
             "Maintainerr": (f"{ICONS}/png/maintainerr.png", LAN["maintainerr"], "Library cleanup"),
+            "Mylar":       (f"{ICONS}/png/mylar.png",       LAN["mylar"],       "Comic requests and automation"),
+            "Komga":       (f"{ICONS}/svg/komga.svg",       LAN["komga"],       "Comic reader"),
             "Immich":      (f"{ICONS}/svg/immich.svg",      LAN["immich"],      "Photos"),
         }
         existing_apps = {a["name"] for a in homarr_rest("GET", "/api/apps")}
@@ -1309,6 +1414,7 @@ data:
         "prowlarr": read_arr_key("/config/prowlarr/config.xml"),
         "bazarr":   read_bazarr_key("/config/bazarr/config/config.yaml"),
         "seerr":    read_seerr_key("/config/seerr/settings.json"),
+        "mylar":    read_mylar_key("/config/mylar/config.ini"),
     }
 
     ensure_jellyfin_access()
@@ -1333,6 +1439,20 @@ data:
     add_prowlarr_app(keys["prowlarr"], "Sonarr", SONARR_URL, keys["sonarr"])
     add_jellyfin_notification(RADARR_URL, keys["radarr"], "Radarr")
     add_jellyfin_notification(SONARR_URL, keys["sonarr"], "Sonarr")
+
+    # Comics are best-effort: a comics-side failure logs and retries on the next
+    # reconcile without ever blocking movie/TV wiring.
+    try:
+        wait_mylar(keys["mylar"])
+        # Prowlarr pushes every comic-capable (7030) indexer into Mylar's
+        # newznab/torznab lists and keeps them synced.
+        add_prowlarr_app(keys["prowlarr"], "Mylar", MYLAR_URL, keys["mylar"])
+    except Exception as e:
+        print(f"Mylar: wiring failed ({type(e).__name__}: {e}) - configure manually if needed", flush=True)
+    try:
+        configure_komga()
+    except Exception as e:
+        print(f"Komga: provisioning failed ({type(e).__name__}: {e}) - configure manually if needed", flush=True)
 
     if ADMIN_USER and ADMIN_PASS and JELLYFIN_API_KEY:
         try:

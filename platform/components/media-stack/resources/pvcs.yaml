@@ -53,3 +53,11 @@ spec:
   accessModes: [ReadWriteOnce]
   storageClassName: config-local-retain
   resources: { requests: { storage: 512Mi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: config-mylar, namespace: media }
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: config-local-retain
+  resources: { requests: { storage: 512Mi } }

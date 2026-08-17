@@ -39,16 +39,18 @@ application PVC explicitly selects `config-local-retain`.
 
 This includes:
 
-- Radarr, Sonarr, Prowlarr, qBittorrent, Bazarr, Seerr, and Maintainerr configuration.
+- Radarr, Sonarr, Prowlarr, qBittorrent, Bazarr, Seerr, Maintainerr, and Mylar configuration.
 - Homarr's `/appdata` volume.
 - Jellyfin configuration and cache.
+- Komga configuration and database.
 - Immich Postgres data and machine-learning cache.
 
 | Workload | PVC(s) | Storage class | Scheduled node | Backup value |
 | --- | --- | --- | --- | --- |
-| Media applications | Seven 512 Mi config PVCs | `config-local-retain` | `k3s-media-01` | High: settings, histories, API keys |
+| Media applications | Eight 512 Mi config PVCs | `config-local-retain` | `k3s-media-01` | High: settings, histories, API keys |
 | Homarr | 1 Gi config | `config-local-retain` | `k3s-apps-01` | Medium: dashboard state |
 | Jellyfin | 2 Gi config + 3 Gi cache | `config-local-retain` | `k3s-media-01` | Config high; cache disposable |
+| Komga | 1 Gi config | `config-local-retain` | `k3s-media-01` | Medium: users, read progress, metadata edits |
 | Immich | 8 Gi Postgres + 2 Gi ML cache | `config-local-retain` | `k3s-media-01` | Postgres critical; ML cache disposable |
 | Media library | Static 500 Gi metadata claim | `media-local` | `k3s-media-01` | Depends on reacquisition cost |
 | Immich library | Static 500 Gi metadata claim | `photos-local` | `k3s-media-01` | Critical and irreplaceable |
@@ -73,15 +75,21 @@ mounts it at `/mnt/data`:
     downloads/
       incomplete/
       complete/
+        comics/
+      ddl/
     library/
       movies/
       tv/
+      comics/
   photos/
 ```
 
 Use `/data/downloads` and `/data/library` in qBittorrent and the Arr applications. Downloads and
-the library share one filesystem, allowing Radarr and Sonarr to hardlink instead of copying.
-Jellyfin sees the library read-only at `/media/library`.
+the library share one filesystem, allowing Radarr, Sonarr, and Mylar to hardlink instead of
+copying. Jellyfin sees the library read-only at `/media/library`; Komga sees it read-only at
+`/data/library`. Comic torrents complete into `downloads/complete/comics` (Mylar imports by
+watching that folder, so it must not see Radarr/Sonarr payloads) and Mylar's GetComics direct
+downloads stage in `downloads/ddl`.
 
 The media and photos PV capacities are binding metadata rather than separate quotas: both share
 the same 600 GB filesystem. Keep the Proxmox thin pool below roughly 80-85% actual usage.
@@ -94,10 +102,14 @@ flowchart LR
     Incomplete --> Complete["downloads/complete"]
     Complete -->|"hardlink/import"| Movies["library/movies"]
     Complete -->|"hardlink/import"| TV["library/tv"]
+    Complete -->|"comics/ · hardlink"| Comics["library/comics"]
     Radarr["Radarr"] --> Movies
     Sonarr["Sonarr"] --> TV
+    Mylar["Mylar"] --> Comics
+    Mylar --> DDL["downloads/ddl"] --> Comics
     Jellyfin["Jellyfin · read-only"] --> Movies
     Jellyfin --> TV
+    Komga["Komga · read-only"] --> Comics
     Immich["Immich"] --> Photos["photos"]
 ```
 
@@ -155,6 +167,12 @@ All five rules exclude media favorited by any Jellyfin user and media tagged `ke
 Sonarr. Maintainerr collection exclusions provide a third per-item escape hatch. The pressure
 rules are inert while free space is healthy; the 80 GiB threshold preserves roughly 13% of the
 media disk for imports, temporary files, and filesystem headroom.
+
+Comics are outside Maintainerr's scope (it only understands Radarr/Sonarr libraries), but at
+roughly 30-100 MB per issue they exert little pressure; prune series in Mylar and Komga by hand
+if the library ever matters at the disk level. Comic torrents also keep seeding after import -
+their hardlinked download copies are the one class of completed download qBittorrent is not
+told to clean up automatically.
 
 The policies are reconciled on every media-stack bootstrap from
 `platform/components/media-stack/resources/bootstrap-configmap.yaml`. Edit the thresholds there,

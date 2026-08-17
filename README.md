@@ -92,6 +92,8 @@ exposure, or TLS termination.
 | [`10.0.0.235`](http://10.0.0.235) | Bazarr | Subtitle automation | Gluetun VPN |
 | [`10.0.0.236`](http://10.0.0.236) | Seerr | Requests and discovery | Gluetun VPN |
 | [`10.0.0.237`](http://10.0.0.237) | Maintainerr | Library maintenance | Gluetun VPN |
+| [`10.0.0.238`](http://10.0.0.238) | Mylar | Comic automation | Gluetun VPN |
+| [`10.0.0.239:25600`](http://10.0.0.239:25600) | Komga | Comic reading | Direct LAN |
 | [`10.0.0.240`](http://10.0.0.240) | Immich | Photo and video backup | Direct LAN |
 
 FlareSolverr is deliberately cluster-internal at `flaresolverr.media.svc.cluster.local:8191`.
@@ -100,16 +102,16 @@ FlareSolverr is deliberately cluster-internal at `flaresolverr.media.svc.cluster
 
 The media applications share a single pod network namespace with Gluetun. Gluetun starts first as
 a native sidecar, establishes Proton VPN, applies its firewall, and only then allows the rest of the
-pod to start. Homarr, Jellyfin, and Immich remain separate because their LAN traffic should not take
-the scenic route through Canada.
+pod to start. Homarr, Jellyfin, Komga, and Immich remain separate because their LAN traffic should
+not take the scenic route through Canada.
 
 ```mermaid
 flowchart LR
     LAN["🏠 Home LAN"]
-    Services["MetalLB services<br/>.231 — .237"]
+    Services["MetalLB services<br/>.231 — .238"]
 
     subgraph Pod["media-stack pod · k3s-media-01"]
-        Apps["Radarr · Sonarr · Prowlarr<br/>qBittorrent · Bazarr · Seerr<br/>Maintainerr · FlareSolverr"]
+        Apps["Radarr · Sonarr · Prowlarr<br/>qBittorrent · Bazarr · Seerr<br/>Maintainerr · Mylar · FlareSolverr"]
         VPN["🛡️ Gluetun<br/>WireGuard + kill switch"]
         Bootstrap["🔧 bootstrap sidecar<br/>idempotent app wiring"]
     end

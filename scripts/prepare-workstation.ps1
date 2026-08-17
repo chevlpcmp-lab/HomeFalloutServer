@@ -225,6 +225,27 @@ stringData:
     Write-Host "Created $mediaSecretPath (gitignored)."
 }
 
+# media-secrets.yaml files that predate the comics stack lack the ComicVine key.
+# Append a stub so seal-secrets.ps1 can deliver it once the value is filled in.
+if ((Test-Path -LiteralPath $mediaSecretPath) -and
+    -not ((Get-Content -LiteralPath $mediaSecretPath -Raw) -match 'name:\s*comicvine')) {
+    $comicvineKey = Read-Host 'ComicVine API key for Mylar (free at comicvine.gamespot.com/api; blank to fill in later)'
+    Add-Content -LiteralPath $mediaSecretPath -Encoding UTF8 -Value @"
+---
+# Free key from https://comicvine.gamespot.com/api/ - Mylar's comic metadata
+# source. Searches and the weekly pull-list fail without it.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: comicvine
+  namespace: media
+type: Opaque
+stringData:
+  COMICVINE_API_KEY: "$comicvineKey"
+"@
+    Write-Host "Added the comicvine Secret to $mediaSecretPath. Run scripts/seal-secrets.ps1 to deliver it."
+}
+
 $tailscaleSecretPath = Join-Path $secretsDir 'tailscale-secrets.yaml'
 if (-not (Test-Path -LiteralPath $tailscaleSecretPath)) {
     $tailscaleSecret = @"

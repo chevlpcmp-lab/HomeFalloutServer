@@ -63,7 +63,7 @@ spec:
                 "json={\"listen_port\":0,\"current_network_interface\":\"lo\"}"
                 http://127.0.0.1:8080/api/v2/app/setPreferences'
             - name: FIREWALL_INPUT_PORTS
-              value: "5055,6246,6767,7878,8000,8080,8191,8989,9696"
+              value: "5055,6246,6767,7878,8000,8080,8090,8191,8989,9696"
             # These private ranges bypass the VPN so LAN clients and Kubernetes probes
             # can reach the UIs. All public destinations still use the tunnel.
             - name: FIREWALL_OUTBOUND_SUBNETS
@@ -123,6 +123,121 @@ spec:
               chown -R 1000:1000 /config
           volumeMounts:
             - { name: config-qbittorrent, mountPath: /config }
+
+        # Mylar3 keeps every setting in config.ini and has no settings API, so its
+        # Git-owned configuration is asserted here before the app starts. The API
+        # key is generated once and then preserved so Prowlarr and the bootstrap
+        # keep authenticating across restarts. UI edits to these keys revert on
+        # the next pod restart - change them here instead.
+        - name: configure-mylar
+          image: python:3.13-slim
+          command:
+            - /usr/local/bin/python3
+            - -c
+            - |
+              import configparser, os, pathlib, secrets
+
+              path = pathlib.Path("/config/config.ini")
+              cfg = configparser.RawConfigParser()
+              if path.exists():
+                  cfg.read(path)
+
+              def ensure(section, values):
+                  if not cfg.has_section(section):
+                      cfg.add_section(section)
+                  for key, value in values.items():
+                      cfg.set(section, key, str(value))
+
+              api_key = None
+              if cfg.has_option("API", "api_key"):
+                  api_key = cfg.get("API", "api_key")
+              ensure("API", {"api_enabled": True, "api_key": api_key or secrets.token_hex(16)})
+
+              comicvine = os.environ.get("COMICVINE_API_KEY", "")
+              if comicvine:
+                  ensure("CV", {"comicvine_api": comicvine})
+              else:
+                  print("configure-mylar: COMICVINE_API_KEY not set - searches will fail until sealed", flush=True)
+
+              admin_user = os.environ.get("ADMIN_USER", "")
+              admin_pass = os.environ.get("ADMIN_PASS", "")
+              if admin_user and admin_pass:
+                  # 2 = forms login. API-key access is unaffected.
+                  ensure("Interface", {"authentication": 2,
+                                       "http_username": admin_user,
+                                       "http_password": admin_pass})
+
+              ensure("General", {
+                  "destination_dir": "/data/library/comics",
+                  "create_folders": True,
+                  # New and upcoming issues of every monitored series are wanted
+                  # automatically - the weekly pull-list grabs them unattended.
+                  "autowant_upcoming": True,
+                  # Writes series.json beside each series; Komga imports it.
+                  "series_metadata_local": True,
+                  "rename_files": True,
+                  "folder_format": "$Series ($Year)",
+                  "file_format": "$Series $Annual $Issue ($Year)",
+              })
+              ensure("PostProcess", {
+                  "post_processing": True,
+                  # Library and downloads share one filesystem; hardlinks keep
+                  # torrents seeding without a second copy.
+                  "file_opts": "hardlink",
+                  # Torrent imports are found by watching the comics category
+                  # folder - Mylar has no completed-download-handling like the Arrs.
+                  "enable_check_folder": True,
+                  "check_folder": "/data/downloads/complete/comics",
+              })
+              ensure("Client", {"torrent_downloader": 5})  # 5 = qBittorrent
+              ensure("qBittorrent", {
+                  # Same pod: localhost bypasses qBittorrent auth either way.
+                  "qbittorrent_host": "localhost:8080",
+                  "qbittorrent_username": admin_user,
+                  "qbittorrent_password": admin_pass,
+                  "qbittorrent_label": "comics",
+              })
+              ensure("Torrents", {
+                  "enable_torrents": True,
+                  "enable_torrent_search": True,
+                  "minseeds": 1,
+              })
+              # Prowlarr's Mylar application sync manages the torznab list itself.
+              ensure("Torznab", {"enable_torznab": True})
+              ensure("DDL", {
+                  # GetComics direct downloads: the reliable comics source when
+                  # torrent indexers come up empty. Rides the pod VPN like all
+                  # other egress, and FlareSolverr (same pod) clears Cloudflare.
+                  "enable_ddl": True,
+                  "enable_getcomics": True,
+                  "ddl_location": "/data/downloads/ddl",
+                  "enable_flaresolverr": True,
+                  "flaresolverr_url": "http://localhost:8191",
+              })
+              ensure("Metatagging", {
+                  # ComicTagger writes ComicInfo.xml into each cbz on import, so
+                  # Komga gets real metadata instead of filename guesses.
+                  "enable_meta": True,
+                  "ct_tag_cr": True,
+              })
+
+              with path.open("w") as handle:
+                  cfg.write(handle)
+              os.chown("/config", 1000, 1000)
+              os.chown(path, 1000, 1000)
+              print("configure-mylar: Git-owned config.ini asserted", flush=True)
+          env:
+            - name: COMICVINE_API_KEY
+              valueFrom:
+                secretKeyRef: { name: comicvine, key: COMICVINE_API_KEY, optional: true }
+            - name: ADMIN_USER
+              valueFrom:
+                secretKeyRef: { name: apps-admin, key: USERNAME, optional: true }
+            - name: ADMIN_PASS
+              valueFrom:
+                secretKeyRef: { name: apps-admin, key: PASSWORD, optional: true }
+          volumeMounts:
+            - { name: config-mylar, mountPath: /config }
 
       containers:
         - name: radarr
@@ -199,6 +314,16 @@ spec:
             - { name: media-data, mountPath: /data }
           resources: *arr-resources
 
+        - name: mylar
+          image: lscr.io/linuxserver/mylar3:v0.10.0-ls267
+          env: *lsio-env
+          ports: [{ name: mylar, containerPort: 8090 }]
+          startupProbe: { tcpSocket: { port: 8090 }, periodSeconds: 5, failureThreshold: 30 }
+          volumeMounts:
+            - { name: config-mylar, mountPath: /config }
+            - { name: media-data, mountPath: /data }
+          resources: *arr-resources
+
         - name: seerr
           image: ghcr.io/seerr-team/seerr:latest
           env:
@@ -262,6 +387,7 @@ spec:
             - { name: config-prowlarr, mountPath: /config/prowlarr, readOnly: true }
             - { name: config-bazarr, mountPath: /config/bazarr, readOnly: true }
             - { name: config-seerr, mountPath: /config/seerr, readOnly: true }
+            - { name: config-mylar, mountPath: /config/mylar, readOnly: true }
             - { name: media-data, mountPath: /data }
           resources:
             requests: { cpu: 10m, memory: 32Mi }
@@ -288,3 +414,4 @@ spec:
         - { name: config-bazarr, persistentVolumeClaim: { claimName: config-bazarr } }
         - { name: config-seerr, persistentVolumeClaim: { claimName: config-seerr } }
         - { name: config-maintainerr, persistentVolumeClaim: { claimName: config-maintainerr } }
+        - { name: config-mylar, persistentVolumeClaim: { claimName: config-mylar } }

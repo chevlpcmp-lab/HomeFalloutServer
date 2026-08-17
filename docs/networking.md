@@ -35,6 +35,8 @@ inside either MetalLB pool. The `.200-.250` range is reserved even when many add
 | `10.0.0.235` | `80` | Bazarr `6767` | `media` | VPN pod |
 | `10.0.0.236` | `80` | Seerr `5055` | `media` | VPN pod |
 | `10.0.0.237` | `80` | Maintainerr `6246` | `media` | VPN pod |
+| `10.0.0.238` | `80` | Mylar `8090` | `media` | VPN pod |
+| `10.0.0.239` | `25600` | Komga `25600` | `media` | Direct |
 | `10.0.0.240` | `80` | Immich `2283` | `photos` | Direct |
 
 FlareSolverr, Immich Postgres, Valkey, and machine learning are ClusterIP-only. They are reachable

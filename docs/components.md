@@ -17,6 +17,7 @@ containers within each application. The definitive configuration remains under
 | `homarr` | `media` | Local resources | 83 | Runs the dashboard independently on the apps worker |
 | `jellyfin` | `media` | Local resources | 85 | Streams the media library directly over the LAN |
 | `immich` | `photos` | Local resources | 87 | Runs photo storage, API, database, cache, and ML |
+| `komga` | `media` | Local resources | 89 | Serves the comic library directly over the LAN |
 
 The `tailscale` resources-only component runs at wave 25 as a subnet router in `networking`; see
 [Tailscale remote access](tailscale.md).
@@ -35,12 +36,14 @@ uses `media-local`.
 | --- | --- | ---: | --- | --- |
 | Gluetun | Pinned `v3.41.1` | internal control ports | None | Proton WireGuard tunnel, firewall, kill switch, NAT-PMP port forwarding |
 | qBittorrent config init | Pinned BusyBox `1.37` | — | qBittorrent config PVC | Enables localhost API bypass while preserving LAN WebUI authentication |
+| Mylar config init | Python `3.13-slim` | — | Mylar config PVC | Asserts Mylar's Git-owned `config.ini` (its settings have no API) before start |
 | Radarr | Pinned LinuxServer release | `7878` | 512 Mi config + shared `/data` | Movie library automation |
 | Sonarr | Pinned LinuxServer release | `8989` | 512 Mi config + shared `/data` | TV library automation |
 | Prowlarr | Pinned LinuxServer release | `9696` | 512 Mi config | Indexer management and Arr synchronization |
 | qBittorrent | Pinned LinuxServer release | `8080` | 512 Mi config + shared `/data` | VPN-bound downloads |
 | FlareSolverr | Pinned `v3.5.0` | `8191` | None | Internal anti-bot proxy for compatible indexers |
 | Bazarr | `latest` | `6767` | 512 Mi config + shared `/data` | Subtitle automation |
+| Mylar | Pinned LinuxServer release | `8090` | 512 Mi config + shared `/data` | Comic library automation: search, weekly pull-list, DDL, import |
 | Seerr | `latest` | `5055` | 512 Mi config | Media requests and discovery |
 | Bootstrap | Python `3.13-slim` | — | Read-only app configs + shared `/data` | Idempotently wires local APIs and optionally provisions Homarr |
 | Maintainerr | `latest` | `6246` | 512 Mi config | Library retention and maintenance rules |
@@ -83,6 +86,10 @@ The bootstrap helper continuously and idempotently configures:
 - Seerr's Jellyfin admin, enabled libraries, and default Radarr/Sonarr instances.
 - Maintainerr's Jellyfin, Radarr, Sonarr, Seerr, and qBittorrent connections.
 - Maintainerr's storage-aware cleanup rules and their review windows.
+- Mylar as a Prowlarr application, so comic-capable (`7030`) indexers sync automatically.
+- The `comics` qBittorrent category with its own completed subfolder for Mylar's folder monitor.
+- Komga's first-run admin (from `apps-admin`) and its `Comics` library with ComicInfo and
+  Mylar `series.json` metadata import enabled.
 - Homarr tiles, integrations, board, and widgets once its API key exists.
 
 Jellyfin first-run setup and its shared administrator are bootstrap-managed from the sealed
@@ -124,6 +131,24 @@ Jellyfin is a standalone Deployment on the media worker.
 
 The read-only library mount keeps Jellyfin from modifying the files owned by Radarr and Sonarr.
 Its LAN stream never traverses Gluetun.
+
+## Komga
+
+Komga follows the Jellyfin pattern: a standalone Deployment on the media worker that consumes the
+library Mylar builds, with reading traffic staying off the VPN.
+
+| Property | Value |
+| --- | --- |
+| Placement | `k3s-media-01` via pool label `media` |
+| LAN address | `http://10.0.0.239:25600` |
+| Configuration | 1 Gi retained local PVC mounted at `/config` (its database grows with the library) |
+| Library | Shared media PV mounted read-only at `/data` |
+| Resources | request `100m / 256Mi`; limit `2 CPU / 1536Mi`, JVM capped at `-Xmx1g` |
+| Provisioning | Media bootstrap claims the admin and creates the `Comics` library over service DNS |
+
+Sign in with the `apps-admin` username as an e-mail address (`<username>@homefallout.local`) and
+the shared password. The `Comics` library scans hourly and on startup; phone and tablet apps
+(Mihon, Panels, Chunky) connect through OPDS at `http://10.0.0.239:25600/opds/v1.2`.
 
 ## Immich
 

@@ -59,7 +59,7 @@ flowchart TB
 | --- | --- | --- | --- | --- |
 | `k3s-cp-01` | server | `homelab.charles/pool=control` | `control-plane=true:NoSchedule` | k3s API, scheduler, controllers, etcd, cluster system pods |
 | `k3s-apps-01` | agent | `homelab.charles/pool=apps` | none | Homarr |
-| `k3s-media-01` | agent | `homelab.charles/pool=media` | none | media-stack, Jellyfin, Immich, databases, data-bound pods |
+| `k3s-media-01` | agent | `homelab.charles/pool=media` | none | media-stack, Jellyfin, Komga, Immich, databases, data-bound pods |
 
 All 28 logical CPUs are presented to VMs, which is acceptable CPU overcommit for bursty home
 workloads. VM memory totals 12 GB, leaving roughly 3 GB for Proxmox after normal host use. The media
@@ -86,6 +86,7 @@ flowchart TB
     subgraph MediaNode["media worker"]
         MediaPod["VPN media-stack pod"]
         Jellyfin["Jellyfin"]
+        Komga["Komga"]
         Immich["Immich server + ML<br/>Postgres + Valkey"]
     end
 
@@ -95,10 +96,12 @@ flowchart TB
     Argo --> Homarr
     Argo --> MediaPod
     Argo --> Jellyfin
+    Argo --> Komga
     Argo --> Immich
     Metal -.->|advertises LAN services| Homarr
     Metal -.->|advertises LAN services| MediaPod
     Metal -.->|advertises LAN services| Jellyfin
+    Metal -.->|advertises LAN services| Komga
     Metal -.->|advertises LAN services| Immich
 ```
 
@@ -120,6 +123,7 @@ flowchart LR
     Platform --> H["Homarr · wave 83"]
     Platform --> J["Jellyfin · wave 85"]
     Platform --> I["Immich · wave 87"]
+    Platform --> K["Komga · wave 89"]
 ```
 
 Each component in `platform/values/values-prod.yaml` can generate these phases:
@@ -147,11 +151,15 @@ flowchart LR
     Bazarr --> Sonarr
     Seerr --> Radarr
     Seerr --> Sonarr
+    Prowlarr --> Mylar
+    Mylar --> qBittorrent
     Radarr --> Movies[("Movies library")]
     Sonarr --> TV[("TV library")]
+    Mylar --> Comics[("Comics library")]
     qBittorrent --> Downloads[("Downloads")]
     Jellyfin --> Movies
     Jellyfin --> TV
+    Komga --> Comics
     Homarr -.->|dashboard integrations| Prowlarr
     Homarr -.->|dashboard integrations| Jellyfin
     Immich --> Postgres[("Postgres")]
@@ -171,12 +179,12 @@ containers. Because containers in one pod share a network namespace, Gluetun own
 route and firewall. Its allowed private ranges preserve LAN, pod, and service connectivity.
 
 The pod includes Radarr, Sonarr, Prowlarr, qBittorrent, FlareSolverr, Bazarr, Seerr, Maintainerr,
-and the bootstrap helper. A config change to any of those containers recreates the complete pod.
-This is a deliberate trade: a strong, inspectable VPN boundary in exchange for a larger restart
-unit.
+Mylar, and the bootstrap helper. A config change to any of those containers recreates the complete
+pod. This is a deliberate trade: a strong, inspectable VPN boundary in exchange for a larger
+restart unit.
 
-Homarr, Jellyfin, and Immich use separate pods and direct egress. Streaming or photo transfers
-should never depend on the VPN tunnel.
+Homarr, Jellyfin, Komga, and Immich use separate pods and direct egress. Streaming, reading, or
+photo transfers should never depend on the VPN tunnel.
 
 ## State and failure domains
 
