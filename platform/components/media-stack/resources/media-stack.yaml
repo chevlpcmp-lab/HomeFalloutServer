@@ -152,10 +152,13 @@ spec:
                   for key, value in values.items():
                       cfg.set(section, key, str(value))
 
-              api_key = None
+              api_key = ""
               if cfg.has_option("API", "api_key"):
                   api_key = cfg.get("API", "api_key")
-              ensure("API", {"api_enabled": True, "api_key": api_key or secrets.token_hex(16)})
+              # Mylar serializes an unset key as the literal string "None".
+              if api_key in ("", "None"):
+                  api_key = secrets.token_hex(16)
+              ensure("API", {"api_enabled": True, "api_key": api_key})
 
               comicvine = os.environ.get("COMICVINE_API_KEY", "")
               if comicvine:
