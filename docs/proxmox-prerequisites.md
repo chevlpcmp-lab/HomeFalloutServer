@@ -13,7 +13,7 @@ pvesm status
 lvs
 ```
 
-The default configuration requests 20 GB, 20 GB, and 28 GB OS/config disks plus a sparse 4 GB
+The default configuration requests 20 GB, 20 GB, and 48 GB OS/config disks plus a sparse 4 GB
 template disk on directory-backed `local`. It requests a separate 600 GB thin-provisioned bulk-data
 disk on `local-lvm`; the rest of that thin pool remains reserved for future Immich/media growth.
 

@@ -69,7 +69,7 @@ is kept tighter.
 | --- | ---: | --- | --- | ---: | ---: | --- | --- |
 | `k3s-cp-01` | 220 | `10.0.0.10` | server / `control` | 4 | 2 GB | 20 GB `local` | Kubernetes control plane and etcd |
 | `k3s-apps-01` | 240 | `10.0.0.11` | agent / `apps` | 8 | 3 GB | 20 GB `local` | Homarr and future general apps |
-| `k3s-media-01` | 230 | `10.0.0.12` | agent / `media` | 16 | 7 GB | 28 GB `local` + 600 GB `local-lvm` | Media stack, Jellyfin, and Immich |
+| `k3s-media-01` | 230 | `10.0.0.12` | agent / `media` | 16 | 7 GB | 48 GB `local` + 600 GB `local-lvm` | Media stack, Jellyfin, and Immich |
 
 The control plane is tainted `NoSchedule`, keeping application pods on the two workers. These VMs
 provide scheduling separation, **not high availability**: the server and its single NVMe remain one

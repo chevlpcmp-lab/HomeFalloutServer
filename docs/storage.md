@@ -7,7 +7,7 @@ application configuration, and large user data so their capacity and backup poli
 | --- | ---: | --- | --- |
 | `local` | 20 GB | control `/` | Ubuntu, k3s control plane, and etcd |
 | `local` | 20 GB | apps `/` | Ubuntu, images, and Homarr config PVC |
-| `local` | 28 GB | media `/` | Ubuntu, images, and media/Immich config and database PVCs |
+| `local` | 48 GB | media `/` | Ubuntu, images, and media/Immich config and database PVCs |
 | `local-lvm` | 600 GB | media `/mnt/data` | Downloads, movies, TV, and Immich originals/uploads |
 
 The remaining unallocated `local-lvm` capacity is deliberately reserved for future media/photo
@@ -18,7 +18,7 @@ flowchart TB
     subgraph Local["Proxmox local · directory storage"]
         CP["control root · 20 GB<br/>k3s + etcd"]
         Apps["apps root · 20 GB<br/>Homarr config"]
-        MediaRoot["media root · 28 GB<br/>app configs + databases"]
+        MediaRoot["media root · 48 GB<br/>app configs + databases"]
     end
 
     subgraph LVM["Proxmox local-lvm · thin pool"]
@@ -59,7 +59,7 @@ and the Sealed Secrets controller state live in etcd on the OS disk, while the s
 must also be copied to encrypted storage outside this server.
 
 The local-path provisioner does not enforce per-PVC quotas. Monitor both worker root filesystems,
-especially the 28 GB media worker disk. A `Retain` reclaim policy protects against automatic
+especially the 48 GB media worker disk. A `Retain` reclaim policy protects against automatic
 deletion; it is not a backup.
 
 ## Bulk media and photos
