@@ -217,6 +217,10 @@ spec:
                   # other egress, and FlareSolverr (same pod) clears Cloudflare.
                   "enable_ddl": True,
                   "enable_getcomics": True,
+                  # Classic back-catalog mostly exists on GetComics as multi-issue
+                  # collection packs rather than singles; prefer them so one grab
+                  # fills a whole run.
+                  "pack_priority": True,
                   "ddl_location": "/data/downloads/ddl",
                   "enable_flaresolverr": True,
                   "flaresolverr_url": "http://localhost:8191",
