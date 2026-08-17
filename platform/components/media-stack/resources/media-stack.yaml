@@ -137,7 +137,11 @@ spec:
             - |
               import configparser, os, pathlib, secrets
 
-              path = pathlib.Path("/config/config.ini")
+              # The LinuxServer image starts Mylar with --datadir /config/mylar,
+              # so the real config.ini lives one level below the volume root.
+              path = pathlib.Path("/config/mylar/config.ini")
+              path.parent.mkdir(parents=True, exist_ok=True)
+              pathlib.Path("/config/config.ini").unlink(missing_ok=True)
               cfg = configparser.RawConfigParser()
               if path.exists():
                   cfg.read(path)
@@ -224,6 +228,7 @@ spec:
               with path.open("w") as handle:
                   cfg.write(handle)
               os.chown("/config", 1000, 1000)
+              os.chown(path.parent, 1000, 1000)
               os.chown(path, 1000, 1000)
               print("configure-mylar: Git-owned config.ini asserted", flush=True)
           env:

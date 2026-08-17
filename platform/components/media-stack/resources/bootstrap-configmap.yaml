@@ -1414,7 +1414,9 @@ data:
         "prowlarr": read_arr_key("/config/prowlarr/config.xml"),
         "bazarr":   read_bazarr_key("/config/bazarr/config/config.yaml"),
         "seerr":    read_seerr_key("/config/seerr/settings.json"),
-        "mylar":    read_mylar_key("/config/mylar/config.ini"),
+        # The PVC is mounted at /config/mylar and the app's --datadir is the
+        # mylar/ subdirectory within it, hence the doubled path segment.
+        "mylar":    read_mylar_key("/config/mylar/mylar/config.ini"),
     }
 
     ensure_jellyfin_access()
