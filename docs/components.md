@@ -127,7 +127,7 @@ Jellyfin is a standalone Deployment on the media worker.
 | Cache | 3 Gi retained local PVC mounted at `/cache` |
 | Library | Shared media PV mounted read-only at `/media` |
 | Resources | request `300m / 768Mi`; limit `4 CPU / 3Gi` |
-| Transcoding | CPU by default; Intel iGPU is not passed through yet |
+| Transcoding | CPU by default; Intel iGPU is not passed through, see [TV console](tv-console.md) |
 
 The read-only library mount keeps Jellyfin from modifying the files owned by Radarr and Sonarr.
 Its LAN stream never traverses Gluetun.

@@ -178,6 +178,7 @@ router prerequisites as well as verification and safe rerun instructions.
 | [Secrets](docs/secrets.md) | You are sealing, rotating, auditing, or recovering credentials |
 | [Application wiring](docs/configuration.md) | You are finishing Homarr/Jellyfin setup or checking the bootstrap sidecar |
 | [Tailscale](docs/tailscale.md) | You want to enable private remote access and optional exit-node routing |
+| [TV console](docs/tv-console.md) | You are setting up or fixing Jellyfin on the TV wired to the Proxmox host |
 | [Proxmox prerequisites](docs/proxmox-prerequisites.md) | You need the API role, storage flags, or address reservations |
 
 ## Repository map
