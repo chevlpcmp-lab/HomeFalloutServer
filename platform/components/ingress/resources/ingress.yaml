@@ -1,0 +1,116 @@
+# The routing table for the whole lab.
+#
+# Every LAN-facing service gets a name under `home.lan`, all pointing at Traefik on
+# 10.0.0.201. Nothing here works until AdGuard Home answers `*.home.lan` with that
+# address — see docs/dns-and-ingress.md.
+#
+# These live in one component rather than scattered across the components they route
+# to, because the useful thing about a routing table is being able to read all of it
+# at once. An Ingress must share a namespace with its Service, hence one object per
+# namespace rather than one per host.
+#
+# No TLS and no class annotation: Traefik owns the cluster's default IngressClass.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: media
+  namespace: media
+spec:
+  rules:
+    # The bare name goes to the dashboard, so `home.lan` is the one thing anyone in
+    # the house has to remember.
+    - host: home.lan
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: homarr, port: { number: 80 } } } }
+    - host: homarr.home.lan
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: homarr, port: { number: 80 } } } }
+    - host: jellyfin.home.lan
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: jellyfin, port: { number: 8096 } } } }
+    - host: komga.home.lan
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: komga, port: { number: 25600 } } } }
+    - host: seerr.home.lan
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: seerr, port: { number: 80 } } } }
+    # The automation tier. These sit behind Gluetun in the media-stack pod; the
+    # Ingress reaches their cluster Services exactly as the LAN addresses do, so
+    # routing here does not put any of their traffic outside the VPN.
+    - host: radarr.home.lan
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: radarr, port: { number: 80 } } } }
+    - host: sonarr.home.lan
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: sonarr, port: { number: 80 } } } }
+    - host: prowlarr.home.lan
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: prowlarr, port: { number: 80 } } } }
+    - host: bazarr.home.lan
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: bazarr, port: { number: 80 } } } }
+    - host: mylar.home.lan
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: mylar, port: { number: 80 } } } }
+    - host: maintainerr.home.lan
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: maintainerr, port: { number: 80 } } } }
+    # qBittorrent validates the Host header and will answer 401 to a name it does not
+    # recognise. Add `qbittorrent.home.lan` under Web UI > "Server domains" once, or
+    # keep using 10.0.0.234 for it. docs/dns-and-ingress.md has the detail.
+    - host: qbittorrent.home.lan
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: qbittorrent, port: { number: 80 } } } }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: photos
+  namespace: photos
+spec:
+  rules:
+    - host: immich.home.lan
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: immich, port: { number: 80 } } } }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: argocd
+  namespace: argocd
+spec:
+  rules:
+    # argocd-server runs in insecure mode here, which is why the existing LAN Service
+    # can map plain :80 to it. Plain HTTP through Traefik works for the same reason.
+    - host: argocd.home.lan
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: argocd, port: { number: 80 } } } }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: networking
+  namespace: networking
+spec:
+  rules:
+    # AdGuard's own UI, routed through the ingress that AdGuard's DNS makes reachable.
+    # If DNS is broken this name cannot resolve, so keep 10.0.0.202:3000 in mind as
+    # the way back in.
+    - host: adguard.home.lan
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: adguard, port: { number: 3000 } } } }

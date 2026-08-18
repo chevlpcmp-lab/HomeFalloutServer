@@ -1,0 +1,65 @@
+# Traefik is the cluster's ingress controller.
+#
+# k3s ships Traefik by default and this lab deliberately turns it off
+# (`k3s_disable` in provisioning/ansible/group_vars/all.yml), so the cluster ran with
+# no ingress at all and every service was reached as IP plus port. Installing it here
+# instead of re-enabling the bundled copy keeps the version and its values in Git
+# rather than in an Ansible flag.
+#
+# HTTP only, deliberately. This is a LAN-only lab with no public exposure, and
+# certificates that every household device would have to be taught to trust buy
+# nothing here. TLS can be layered on later without changing any Ingress object.
+
+deployment:
+  replicas: 1
+
+# Own the cluster's default IngressClass, so an Ingress with no class still routes.
+ingressClass:
+  enabled: true
+  isDefaultClass: true
+
+ports:
+  web:
+    expose:
+      default: true
+    exposedPort: 80
+  # No TLS entrypoint and no dashboard entrypoint on the LAN address. Both can be
+  # turned on later; neither should be reachable by accident in the meantime.
+  websecure:
+    expose:
+      default: false
+  traefik:
+    expose:
+      default: false
+
+service:
+  enabled: true
+  annotations:
+    metallb.io/loadBalancerIPs: "10.0.0.201"
+  spec:
+    type: LoadBalancer
+
+providers:
+  kubernetesIngress:
+    enabled: true
+    # Report the LoadBalancer address back into each Ingress's status, so
+    # `kubectl get ingress` shows 10.0.0.201 rather than an empty ADDRESS column.
+    publishedService:
+      enabled: true
+  kubernetesCRD:
+    enabled: true
+
+# The apps worker, matching Homarr. Traefik is small, and keeping it off the media
+# worker leaves that node's memory to Jellyfin and Immich.
+nodeSelector:
+  homelab.charles/pool: apps
+
+# Small on purpose: the host has roughly 2 GB of headroom left, and a router that
+# proxies a handful of LAN requests does not need more than this.
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: "1"
+    memory: 192Mi

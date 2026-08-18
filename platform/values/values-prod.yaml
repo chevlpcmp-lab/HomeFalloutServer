@@ -64,6 +64,26 @@ components:
     resources:
       enabled: true
 
+  # Ingress controller for the whole lab (10.0.0.201). k3s was told not to install
+  # its bundled Traefik, so this is the cluster's only ingress.
+  - name: traefik
+    tier: network
+    waveOffset: 6
+    namespace: networking
+    chart:
+      repoURL: https://traefik.github.io/charts
+      name: traefik
+      version: "41.2.0"
+
+  # Network-wide DNS filtering (10.0.0.202), and the resolver that answers
+  # *.home.lan with Traefik's address.
+  - name: adguard
+    tier: network
+    waveOffset: 8
+    namespace: networking
+    resources:
+      enabled: true
+
   - name: storage
     tier: storage
     namespace: media
@@ -114,5 +134,16 @@ components:
     waveOffset: 8
     namespace: media
     project: applications
+    resources:
+      enabled: true
+
+  # Hostnames for everything, synced last because each rule names a Service that the
+  # components above create. Uses the infrastructure project: its rules span the
+  # media, photos, argocd, and networking namespaces, which the applications project
+  # is not allowed to touch.
+  - name: ingress
+    tier: apps
+    waveOffset: 10
+    namespace: media
     resources:
       enabled: true
