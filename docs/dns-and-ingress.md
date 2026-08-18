@@ -81,12 +81,23 @@ The wildcard does not cover the bare name, which is why both entries are needed.
 
 ### 3. Point devices at it
 
-Test on one device before touching the router: set its DNS manually to `10.0.0.202`, then confirm
-an ad-heavy page is cleaner and `http://jellyfin.home.lan` opens. Only then change the router's
-DHCP to hand out `10.0.0.202` as the DNS server for the LAN.
+Test one device first: set its DNS manually to `10.0.0.202`, confirm an ad-heavy page comes back
+cleaner and `http://jellyfin.home.lan` opens. Staging it this way matters because a mistake here
+takes the household's internet down, not just a service.
 
-Staging it this way matters because a mistake here takes the whole household's internet down, not
-just a service.
+To cover everyone, set the DHCP-advertised DNS server on the router at `http://10.0.0.1` to
+`10.0.0.202`. Devices pick it up on lease renewal; reconnecting Wi-Fi or rebooting the router makes
+it immediate.
+
+**Make AdGuard the only DNS server the router hands out.** The instinct to add a public resolver as
+a secondary for resilience backfires: clients do not treat a secondary as failover-only. Windows and
+Android query both and take whichever answers first, so ads leak through unpredictably and the
+filtering becomes a coin flip. If you want redundancy, the answer is a second AdGuard, not a
+non-filtering fallback.
+
+That means accepting a real cost deliberately: if the apps worker is down, nobody in the house
+resolves anything until you change the setting back. The router page is the escape hatch, and every
+service keeps its original IP so the lab itself stays reachable.
 
 ## Before you flip the router
 
@@ -95,16 +106,44 @@ all name resolution. If the apps worker is down, or the pod is rescheduling, or 
 nobody can reach anything, including the internet. That is the real cost of network-wide filtering
 and it is worth accepting deliberately rather than discovering at dinner time.
 
-Two mitigations worth taking:
+**The k3s VMs are already safe from the circular dependency this would otherwise invite.** Terraform
+gives them static DNS through cloud-init rather than DHCP:
 
-- **Give the router a second DNS server** that is not AdGuard (for example `1.1.1.1`). Clients fall
-  back when AdGuard is unreachable. The tradeoff is that some clients will occasionally use the
-  fallback and see ads.
-- **Do not let the three k3s VMs resolve through AdGuard.** They currently take DNS from DHCP, so
-  handing out `10.0.0.202` to everything points them at a pod that runs *on* the cluster they are
-  booting. Images are usually cached so a cold boot normally works, but it is a circular dependency
-  waiting for a bad day. Give `10.0.0.10-12` static DNS at the router, or a static reservation
-  pointing at the router's own resolver.
+```hcl
+variable "nameservers" {
+  default = ["10.0.0.1", "1.1.1.1"]
+}
+```
+
+So `10.0.0.10-12` resolve through the router and Cloudflare no matter what DHCP advertises, and
+never depend on a pod running inside the cluster they are booting. Nothing to do here — just do not
+undo it by configuring DNS inside the guests.
+
+The remaining exposure is the household one, and there is no clever way around it: one pod answers
+for everyone. Keep the router's admin page reachable, and remember that reverting is a one-field
+change.
+
+## Reaching it over Tailscale
+
+Devices on the tailnet can already *reach* `10.0.0.201` — the subnet router advertises
+`10.0.0.0/24`. What they cannot do is resolve `home.lan`, because they use their own local resolver
+and the router's DHCP setting only reaches devices on the home Wi-Fi.
+
+Fix it with split DNS, in the Tailscale admin console under **DNS → Nameservers → Add nameserver →
+Custom**: enter `10.0.0.202`, turn on **Restrict to domain**, and enter `home.lan`. MagicDNS must be
+enabled.
+
+Only `*.home.lan` queries then travel to AdGuard over the tailnet; every other lookup stays on the
+device's own resolver. That restriction matters on cellular — without it you would backhaul a
+phone's entire DNS through the house.
+
+This deliberately does not extend ad filtering to roaming devices. Doing that means sending all
+their DNS home, which is a different tradeoff and a much slower one away from the LAN.
+
+**Check the tailnet ACLs before assuming this works for everyone.** If family devices are narrowed
+to `10.0.0.230-240` as [Tailscale remote access](tailscale.md) suggests, hostnames will neither
+resolve nor route for them: AdGuard is at `.202` and Traefik at `.201`, both outside that range.
+Either add those two addresses to the ACL, or leave those users on the direct IPs.
 
 ## qBittorrent
 
@@ -134,6 +173,21 @@ curl -H "Host: jellyfin.home.lan" http://10.0.0.201/
 ```
 
 A `200` or a redirect means Traefik is routing correctly and anything still broken is DNS.
+
+Once the rewrites exist, this tests the whole chain, taking the address from AdGuard rather than
+hardcoding it — which is what a browser does:
+
+```bash
+for h in home.lan jellyfin.home.lan immich.home.lan argocd.home.lan; do
+  ip=$(nslookup "$h" 10.0.0.202 | awk '/^Address/{a=$2} END{print a}')
+  code=$(curl -s -o /dev/null -w "%{http_code}" --resolve "$h:80:$ip" "http://$h/")
+  printf '%-24s %-12s HTTP %s
+' "$h" "$ip" "$code"
+done
+```
+
+Redirects are healthy: Jellyfin answers 302 to `/web/`, Argo CD and Seerr 307 to their login pages,
+Mylar 303. Only a connection failure or a 404 is a real problem.
 
 ## Backing out
 
