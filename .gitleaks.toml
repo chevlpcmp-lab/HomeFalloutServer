@@ -46,6 +46,14 @@ paths = ['''^platform/components/tailscale/resources/sealed-secret-tailscale-aut
 regexes = ['''^\s+TS_AUTHKEY:\s+Ag[A-Za-z0-9+/=_-]{100,}\s*$''']
 
 [[allowlists]]
+description = "Comic Vine cluster-sealed ciphertext field"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = ['''^platform/components/media-stack/resources/sealed-secret-comicvine\.yaml$''']
+regexes = ['''^\s+COMICVINE_API_KEY:\s+Ag[A-Za-z0-9+/=_-]{100,}\s*$''']
+
+[[allowlists]]
 description = "Documented non-secret example placeholder"
 targetRules = ["generic-api-key"]
 regexes = ['''^REPLACE_WITH_64_HEX_CHARACTERS$''']
