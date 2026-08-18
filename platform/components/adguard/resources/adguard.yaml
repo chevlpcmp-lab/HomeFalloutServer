@@ -1,0 +1,89 @@
+# AdGuard Home: network-wide DNS filtering for every device in the house, and the
+# resolver that makes the *.home.lan ingress names work.
+#
+# Two jobs in one service, and the second is what ties this to the ingress component:
+# a DNS rewrite of *.home.lan to Traefik's address (10.0.0.201) is what turns
+# `jellyfin.home.lan` into something a phone can open.
+#
+# Read docs/dns-and-ingress.md before pointing the router's DHCP at this. Making a
+# pod the household's only resolver has a failure mode that is worth understanding
+# first.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: adguard-config
+  namespace: networking
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: config-local-retain
+  resources: { requests: { storage: 1Gi } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: adguard
+  namespace: networking
+spec:
+  replicas: 1
+  # Recreate, not RollingUpdate: the config lives on a ReadWriteOnce local-path
+  # volume, so two replicas can never be up at once anyway.
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: adguard }
+  template:
+    metadata:
+      labels: { app: adguard }
+    spec:
+      # Pinned to the apps worker because config-local-retain is node-local storage:
+      # the config only exists on the node that first bound the claim.
+      nodeSelector:
+        homelab.charles/pool: apps
+      containers:
+        - name: adguard
+          # Held one release behind the newest tag on purpose. This is the resolver
+          # the whole house depends on; a same-day release is not the place to find
+          # out about a regression.
+          image: adguard/adguardhome:v0.107.78
+          ports:
+            - { name: dns-tcp, containerPort: 53, protocol: TCP }
+            - { name: dns-udp, containerPort: 53, protocol: UDP }
+            - { name: http, containerPort: 3000, protocol: TCP }
+          volumeMounts:
+            # The image wants two directories. One claim with subPaths keeps this to
+            # a single volume rather than two claims that must land on one node.
+            - { name: config, mountPath: /opt/adguardhome/work, subPath: work }
+            - { name: config, mountPath: /opt/adguardhome/conf, subPath: conf }
+          startupProbe:
+            tcpSocket: { port: 3000 }
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket: { port: 3000 }
+            periodSeconds: 15
+          livenessProbe:
+            tcpSocket: { port: 3000 }
+            periodSeconds: 30
+            failureThreshold: 5
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits: { cpu: "1", memory: 256Mi }
+      volumes:
+        - { name: config, persistentVolumeClaim: { claimName: adguard-config } }
+---
+# One LoadBalancer carrying both DNS protocols and the web UI. Mixed TCP/UDP on a
+# single service is fine on this Kubernetes version, and it keeps the household with
+# one address to remember for DNS.
+apiVersion: v1
+kind: Service
+metadata:
+  name: adguard
+  namespace: networking
+  annotations:
+    metallb.io/loadBalancerIPs: "10.0.0.202"
+spec:
+  type: LoadBalancer
+  selector: { app: adguard }
+  ports:
+    - { name: dns-tcp, port: 53, targetPort: 53, protocol: TCP }
+    - { name: dns-udp, port: 53, targetPort: 53, protocol: UDP }
+    - { name: http, port: 3000, targetPort: 3000, protocol: TCP }

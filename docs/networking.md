@@ -26,6 +26,8 @@ inside either MetalLB pool. The `.200-.250` range is reserved even when many add
 | Address | Service port | Pod target | Namespace | Route |
 | --- | ---: | ---: | --- | --- |
 | `10.0.0.200` | `80`, `443` | Argo CD server `8080` | `argocd` | Direct |
+| `10.0.0.201` | `80` | Traefik ingress, routes `*.home.lan` | `networking` | Direct |
+| `10.0.0.202` | `53` TCP+UDP, `3000` | AdGuard Home DNS and UI | `networking` | Direct |
 | `10.0.0.220` | `80` | Homarr `7575` | `media` | Direct |
 | `10.0.0.230` | `8096` | Jellyfin `8096` | `media` | Direct |
 | `10.0.0.231` | `80` | Radarr `7878` | `media` | VPN pod |

@@ -11,6 +11,8 @@ containers within each application. The definitive configuration remains under
 | `namespaces` | `argocd` | Local resources | 1 | Creates `networking`, `media`, `photos`, and `secrets` |
 | `metallb` | `networking` | Helm `0.15.3` + resources | 20/21 | Advertises stable LAN LoadBalancer addresses using L2 |
 | `argocd` | `argocd` | Local resources | 23 | Adds a stable `10.0.0.200` LAN Service without patching upstream manifests |
+| `traefik` | `networking` | Helm `41.2.0` | 26 | Ingress controller for every `*.home.lan` hostname |
+| `adguard` | `networking` | Local resources | 29 | LAN DNS filtering, and resolves `*.home.lan` to Traefik |
 | `storage` | `media` | Local resources | 41 | Defines local storage classes, PVs, and bulk-data PVCs |
 | `sealed-secrets` | `secrets` | Helm `2.19.1` | 60 | Decrypts committed SealedSecrets into namespace Secrets |
 | `media-stack` | `media` | Local resources | 81 | Runs the VPN-sharing automation pod and its services |
@@ -18,6 +20,7 @@ containers within each application. The definitive configuration remains under
 | `jellyfin` | `media` | Local resources | 85 | Streams the media library directly over the LAN |
 | `immich` | `photos` | Local resources | 87 | Runs photo storage, API, database, cache, and ML |
 | `komga` | `media` | Local resources | 89 | Serves the comic library directly over the LAN |
+| `ingress` | `media` | Local resources | 91 | Hostname rules for every LAN service, across four namespaces |
 
 The `tailscale` resources-only component runs at wave 25 as a subnet router in `networking`; see
 [Tailscale remote access](tailscale.md).
@@ -187,6 +190,36 @@ the `homefallout-root` Application owns the platform chart and all child Applica
 repository credential is currently an SSH deploy key stored in a gitignored Kubernetes Secret.
 The `argocd` component owns only a second LoadBalancer Service at `10.0.0.200`; keeping that Service
 separate lets future upstream manifest refreshes remain untouched.
+
+### Traefik
+
+k3s bundles Traefik and this lab disables it in `k3s_disable`, so the chart is installed here
+instead. That keeps the version and its values in Git rather than in an Ansible flag. It owns the
+cluster's default IngressClass, exposes only the `web` entrypoint on `10.0.0.201`, and serves plain
+HTTP: this is a LAN with no public exposure, and certificates every device would have to be taught
+to trust buy nothing. See [DNS and ingress](dns-and-ingress.md).
+
+### AdGuard Home
+
+Filters DNS for the whole house and answers `*.home.lan` with Traefik's address, which is what makes
+the hostnames resolve. One LoadBalancer at `10.0.0.202` carries DNS on 53 (TCP and UDP) and the web
+UI on 3000; config lives on a retained node-local PVC pinned to the apps worker.
+
+First-run setup is manual, matching the boundary Homarr and Immich already draw. **The wizard must
+be told to use port 3000 for the admin interface**, not its default of 80, or the readiness probe
+never passes.
+
+Pointing the router's DHCP at it makes one pod responsible for all name resolution in the house.
+[DNS and ingress](dns-and-ingress.md) covers the staged rollout and the two mitigations worth
+taking first.
+
+### Ingress
+
+One component holding the Ingress objects for every LAN-facing service, rather than scattering them
+across the components they route to — the useful thing about a routing table is reading all of it at
+once. An Ingress must share a namespace with its Service, so it is one object per namespace across
+`media`, `photos`, `argocd`, and `networking`. It syncs last, because every rule names a Service the
+components above create.
 
 ### Tailscale
 

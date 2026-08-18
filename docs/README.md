@@ -17,6 +17,7 @@ it when the gremlins arrive.
 | Create, rotate, audit, or recover secrets | [Secret management](secrets.md) |
 | Finish the app integrations | [First-run application wiring](configuration.md) |
 | Enable private remote access | [Tailscale subnet router](tailscale.md) |
+| Use hostnames instead of IPs, or block ads | [DNS and ingress](dns-and-ingress.md) |
 | Watch Jellyfin on the TV wired to the host | [TV console](tv-console.md) |
 | Prepare a fresh Proxmox host | [Proxmox prerequisites](proxmox-prerequisites.md) |
 
@@ -31,6 +32,8 @@ it when the gremlins arrive.
 | Node addresses | `10.0.0.10`, `.11`, `.12` |
 | LoadBalancer ranges | `10.0.0.200-229`, `10.0.0.230-250` |
 | Argo CD UI | `http://10.0.0.200` on the LAN |
+| Ingress / LAN DNS | Traefik `10.0.0.201`, AdGuard Home `10.0.0.202` |
+| Service hostnames | `*.home.lan` via AdGuard rewrite to Traefik |
 | Pod / service CIDRs | `10.42.0.0/16`, `10.43.0.0/16` |
 | GitOps root | `homefallout-root` in `argocd` |
 | Persistent config | Node-local PVCs on Proxmox `local` |

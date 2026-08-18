@@ -29,6 +29,8 @@ and Argo CD continuously reconciles the platform and applications from Git.
 | Networking | MetalLB in L2 mode | Gives LAN-friendly addresses to services |
 | GitOps | Argo CD | Self-heals the cluster from this repository |
 | Secrets | Bitnami Sealed Secrets | Keeps only encrypted application secrets in Git |
+| Ingress | Traefik | Hostname routing for every LAN service |
+| LAN DNS | AdGuard Home | Ad filtering and `*.home.lan` resolution |
 | Remote access | Tailscale subnet router | Private access without router ports |
 | Workloads | Jellyfin, Immich, Homarr, and the VPN media stack | Streams, stores, requests, and automates media |
 
@@ -83,6 +85,8 @@ exposure, or TLS termination.
 | Address | Service | Purpose | Egress |
 | --- | --- | --- | --- |
 | [`10.0.0.200`](http://10.0.0.200) | Argo CD | GitOps UI and API | Direct LAN |
+| [`10.0.0.201`](http://10.0.0.201) | Traefik | Ingress for every `*.home.lan` name | Direct LAN |
+| [`10.0.0.202:3000`](http://10.0.0.202:3000) | AdGuard Home | LAN DNS and ad filtering | Direct LAN |
 | [`10.0.0.220`](http://10.0.0.220) | Homarr | Dashboard and integrations | Direct LAN |
 | [`10.0.0.230:8096`](http://10.0.0.230:8096) | Jellyfin | Media streaming | Direct LAN |
 | [`10.0.0.231`](http://10.0.0.231) | Radarr | Movie automation | Gluetun VPN |
@@ -179,6 +183,7 @@ router prerequisites as well as verification and safe rerun instructions.
 | [Application wiring](docs/configuration.md) | You are finishing Homarr/Jellyfin setup or checking the bootstrap sidecar |
 | [Tailscale](docs/tailscale.md) | You want to enable private remote access and optional exit-node routing |
 | [TV console](docs/tv-console.md) | You are setting up or fixing Jellyfin on the TV wired to the Proxmox host |
+| [DNS and ingress](docs/dns-and-ingress.md) | You want hostnames instead of IP:port, or network-wide ad blocking |
 | [Proxmox prerequisites](docs/proxmox-prerequisites.md) | You need the API role, storage flags, or address reservations |
 
 ## Repository map
