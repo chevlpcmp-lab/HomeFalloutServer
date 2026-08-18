@@ -21,6 +21,12 @@ networks, while Gluetun changes only the media pod's outbound route.
 Configure the router's DHCP pool to end at or below `10.0.0.199`. Do not create DHCP reservations
 inside either MetalLB pool. The `.200-.250` range is reserved even when many addresses are unused.
 
+This is a real prerequisite, not a formality: the Helix shipped handing out `10.0.0.2-253`, which
+covered every MetalLB address and the three k3s VMs, and was corrected to `10.0.0.100-199`. Starting
+at `.100` also keeps DHCP away from the statically addressed VMs at `.10-.12`. The gateway exposes
+no DNS setting on any page, so LAN-wide DNS cannot be pushed from it; see
+[DNS and ingress](dns-and-ingress.md).
+
 ## Published services
 
 | Address | Service port | Pod target | Namespace | Route |
