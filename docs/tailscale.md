@@ -46,4 +46,7 @@ ever lost, generate a fresh key and reseal.
   Disable key expiry) so the router does not drop off the tailnet after the default
   180 days.
 - Access can be narrowed later with tailnet ACLs (for example, family devices may reach
-  only `10.0.0.230-240`).
+  only `10.0.0.230-240`). Note that doing so also blocks the `*.home.lan` hostnames for those
+  users: Traefik is at `10.0.0.201` and AdGuard at `10.0.0.202`, both outside that range. See
+  [DNS and ingress](dns-and-ingress.md) for the split-DNS setup that makes hostnames resolve
+  off-LAN at all.
