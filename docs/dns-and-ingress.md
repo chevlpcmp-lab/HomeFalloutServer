@@ -106,11 +106,15 @@ Two mitigations worth taking:
   waiting for a bad day. Give `10.0.0.10-12` static DNS at the router, or a static reservation
   pointing at the router's own resolver.
 
-## qBittorrent needs one extra step
+## qBittorrent
 
-qBittorrent validates the `Host` header and answers `401 Unauthorized` to a name it does not
-recognise, so `qbittorrent.home.lan` will not work until you tell it that name is legitimate:
-**Tools → Options → Web UI → "Server domains"**, add `qbittorrent.home.lan` (or `*`).
+qBittorrent can validate the `Host` header and answer `401 Unauthorized` to a name it does not
+recognise. On this cluster it does not: `qbittorrent.home.lan` was tested through Traefik and
+returned its real WebUI, so no configuration is needed.
+
+Worth knowing anyway, because it is the one service here with a failure mode that looks like a
+routing bug but is not. If it ever starts answering 401 on the hostname while `10.0.0.234` still
+works, the fix is **Tools → Options → Web UI → "Server domains"**: add `qbittorrent.home.lan`.
 
 Everything else routes without configuration.
 

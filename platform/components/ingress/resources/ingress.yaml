@@ -66,9 +66,9 @@ spec:
       http:
         paths:
           - { path: /, pathType: Prefix, backend: { service: { name: maintainerr, port: { number: 80 } } } }
-    # qBittorrent validates the Host header and will answer 401 to a name it does not
-    # recognise. Add `qbittorrent.home.lan` under Web UI > "Server domains" once, or
-    # keep using 10.0.0.234 for it. docs/dns-and-ingress.md has the detail.
+    # qBittorrent can validate the Host header and answer 401 to a name it does not
+    # recognise. Tested here and it does not, but if it ever starts, the fix is to add
+    # this name under Web UI > "Server domains" rather than to change any routing.
     - host: qbittorrent.home.lan
       http:
         paths:
