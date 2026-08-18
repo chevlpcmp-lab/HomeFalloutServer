@@ -66,8 +66,8 @@ ssh root@10.0.0.254 'bash /root/tv-kiosk.sh'
 
 It refuses to run if the iGPU is missing from the host or the root filesystem is short on space,
 warns if Jellyfin is unreachable, then installs the packages, creates a locked `tv` user, installs
-the player from Flathub, forces it fullscreen through openbox, writes the session files, and
-enables autologin on `tty1`. The Intel VA-API driver arrives on its own: the KDE runtime declares
+the player from Flathub, forces it fullscreen through openbox, sets the default display mode,
+writes the session files, and enables autologin on `tty1`. The Intel VA-API driver arrives on its own: the KDE runtime declares
 it `download-if=have-intel-gpu`, so flatpak pulls it in unasked on a host with an iGPU, and the
 script verifies rather than installs it.
 
@@ -144,6 +144,7 @@ Turn the TV on, pick the input, use the arrow keys and Enter. That is the whole 
 | Update the player | `flatpak update --system` |
 | Confirm everything is still wired up | `bash /root/tv-kiosk.sh --check` |
 | Repoint audio at HDMI after an audio change | `bash /root/tv-kiosk.sh --audio` |
+| Switch resolution | `bash /root/tv-kiosk.sh --display 4k` or `1080p` |
 
 The player should also register as a Jellyfin session, so it can be cast to and controlled from the
 Jellyfin phone app when the keyboard is out of reach. That has not been verified on this host.
@@ -157,22 +158,39 @@ DISPLAY=:0 XAUTHORITY=$XAUTH scrot -o /tmp/tv.png
 
 ## Display mode
 
-The TV negotiates `3840x2160` at **30 Hz**, which is the ceiling this cable and port offer — the
-mode list has no 4K60 in it. That is fine for films, which are 24p anyway, and the panel offers
-`23.98` and `24.00` at 4K for judder-free playback. It does make menus feel less fluid than they
-would at 60 Hz.
+**The default is 1920x1080 at 60 Hz**, not the panel's native 4K. Two reasons, and the first
+matters more than it sounds:
 
-If the interface feels sluggish, `1920x1080` is available at 60 Hz and even 120 Hz, at the cost of
-letting the TV upscale:
+- **The Jellyfin web UI does not scale.** It renders at 1:1 CSS pixels with no DPI scaling, so on a
+  4K panel every label, poster caption, and menu item is a quarter of its intended size. On a
+  monitor at desk distance that is merely small; from a sofa it is unreadable. At 1080p the
+  interface fills the screen the way it was designed to.
+- **This TV has no 4K60.** Its mode list tops out at `3840x2160` at 30 Hz, so native resolution
+  also means half the refresh rate.
+
+Video is unaffected in the way people assume: a 1080p film is not being upscaled twice, and 4K
+content downscales cleanly. Choosing 4K trades a readable interface for sharpness in the minority
+of files that are actually 4K.
+
+Switch whenever you like — it applies immediately and survives restarts:
 
 ```bash
-XAUTH=$(ls -t /tmp/serverauth.* | head -1)
-DISPLAY=:0 XAUTHORITY=$XAUTH xrandr --output HDMI-1 --mode 1920x1080 --rate 60
+bash /root/tv-kiosk.sh --display 4k      # 3840x2160 at 30 Hz
+bash /root/tv-kiosk.sh --display 1080p   # 1920x1080 at 60 Hz, the default
+bash /root/tv-kiosk.sh --display         # current mode and the choices
 ```
 
-To make a choice permanent, add the `xrandr` line to `/home/tv/.xinitrc` above the `openbox &` line
-— but note that `tv-kiosk.sh` rewrites that file on every run, so the change belongs in the script
-rather than on the host.
+The choice is recorded in `/home/tv/.config/tv-kiosk/display.conf` and applied by `.xinitrc` at
+session start, because the TV otherwise reverts to its own preferred mode on every restart. A
+rerun of the script never overwrites a choice made with `--display`; only a host with no conf file
+at all gets the 1080p default.
+
+`--display` also regenerates `.xinitrc`. Saving the mode is only half of persistence — a session
+file written before this feature existed has no idea the conf is there, and the TV silently reverts
+on the next restart.
+
+If the panel does not advertise the requested mode, `--display` refuses rather than leaving a black
+screen behind.
 
 ## Verifying it earns its keep
 

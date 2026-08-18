@@ -8,9 +8,12 @@
 #   ssh root@10.0.0.254 'bash /root/tv-kiosk.sh --check'
 #   ssh root@10.0.0.254 'bash /root/tv-kiosk.sh'
 #
-#   --check      report what is and is not in place, change nothing
-#   --audio      point audio at HDMI; run once after the session is first up
-#   --uninstall  put the host back to a plain text console
+#   --check          report what is and is not in place, change nothing
+#   --audio          point audio at HDMI; run once after the session is first up
+#   --display 4k     3840x2160 at 30 Hz - sharp, but the Jellyfin UI renders tiny
+#   --display 1080p  1920x1080 at 60 Hz - the default; readable from a sofa
+#   --display        show the current mode and what else the TV offers
+#   --uninstall      put the host back to a plain text console
 #
 # Everything here is idempotent: rerun it after a Proxmox upgrade to repair the session.
 # See docs/tv-console.md for the first-run checklist and the audio troubleshooting.
@@ -25,6 +28,15 @@ JELLYFIN_URL="${JELLYFIN_URL:-http://10.0.0.230:8096}"
 FLATPAK_APP="org.jellyfin.JellyfinDesktop"
 VAAPI_EXT="org.freedesktop.Platform.VAAPI.Intel"
 GETTY_DROPIN="/etc/systemd/system/getty@tty1.service.d/autologin.conf"
+# Where --display records its choice. Read by .xinitrc at session start, because that
+# file is regenerated on every run of this script and would lose a hand-edited xrandr.
+DISPLAY_CONF_REL=".config/tv-kiosk/display.conf"
+# 1080p60 by default, not the TV's native 4K30. The Jellyfin web UI renders at 1:1 CSS
+# pixels with no DPI scaling, so on a 4K panel every label is a quarter of the size it
+# should be and unreadable from a sofa. 1080p also buys 60 Hz, since this panel offers
+# no 4K60 at all. Override per-host with --display 4k.
+DEFAULT_MODE="1920x1080"
+DEFAULT_RATE="60"
 # The KDE runtime that Jellyfin Desktop pulls in is the bulk of this, and the Proxmox
 # root filesystem is the same one holding the VM disks, so check before spending it.
 MIN_FREE_GB=5
@@ -166,6 +178,32 @@ install_app() {
   fi
 }
 
+write_display_default() {
+  say "display default"
+  local home conf
+  home="$(home_of)"
+  conf="${home}/${DISPLAY_CONF_REL}"
+
+  # Never clobber a deliberate --display choice on a rerun.
+  if [[ -f "$conf" ]]; then
+    info "keeping the existing choice in ${conf}"
+    return
+  fi
+
+  mkdir -p "$(dirname "$conf")"
+  # OUTPUT is deliberately blank: at install time X has never run, so there is nothing
+  # to detect. .xinitrc fills it in from the connected output at session start.
+  cat > "$conf" <<EOF
+# Written by tv-kiosk.sh. Applied by .xinitrc at session start.
+# Change with: tv-kiosk.sh --display 4k | 1080p
+OUTPUT=
+MODE=${DEFAULT_MODE}
+RATE=${DEFAULT_RATE}
+EOF
+  chown -R "${KIOSK_USER}:${KIOSK_USER}" "${home}/.config"
+  info "${DEFAULT_MODE} at ${DEFAULT_RATE} Hz"
+}
+
 configure_wm() {
   say "window manager"
   local home
@@ -207,6 +245,16 @@ xset s off
 xset s noblank
 xset -dpms
 
+# Apply the saved display mode, if there is one. Without this the TV comes back at
+# its own preferred mode on every restart. No backticks anywhere in this heredoc: it
+# is unquoted, so they would run as command substitution while the file is generated.
+if [ -r "\$HOME/${DISPLAY_CONF_REL}" ]; then
+    . "\$HOME/${DISPLAY_CONF_REL}"
+    # OUTPUT is blank in the default conf, written before X had ever run on this host.
+    [ -z "\$OUTPUT" ] && OUTPUT=\$(xrandr | awk '/ connected/ { print \$1; exit }')
+    [ -n "\$MODE" ] && xrandr --output "\$OUTPUT" --mode "\$MODE" --rate "\$RATE" || true
+fi
+
 # A window manager for the player to ask fullscreen from. Openbox is about 1 MB and
 # does nothing else here.
 openbox &
@@ -245,6 +293,75 @@ ExecStart=-/sbin/agetty --autologin ${KIOSK_USER} --noclear %I \$TERM
 EOF
   systemctl daemon-reload
   info "wrote ${GETTY_DROPIN}"
+}
+
+# ---------------------------------------------------------------- display
+
+# Run a command against the kiosk session's X server. startx keeps its cookie in
+# /tmp/serverauth.*, owned by the kiosk user, so point XAUTHORITY at the newest one.
+x_env() {
+  local auth
+  auth=$(ls -t /tmp/serverauth.* 2>/dev/null | head -1)
+  [[ -n "${auth:-}" ]] || return 1
+  runuser -u "$KIOSK_USER" -- env DISPLAY=:0 XAUTHORITY="$auth" "$@"
+}
+
+connected_output() {
+  x_env xrandr 2>/dev/null | awk '/ connected/ { print $1; exit }'
+}
+
+set_display() {
+  [[ $EUID -eq 0 ]] || die "run this as root on the Proxmox host"
+
+  local home
+  home="$(home_of)"
+  [[ -n "$home" ]] || die "no ${KIOSK_USER} user; run the install first"
+
+  local output
+  output=$(connected_output)     || die "no session for ${KIOSK_USER}. Start it first: systemctl restart getty@tty1.service"
+  [[ -n "${output:-}" ]] || die "no connected output found"
+
+  local choice="${1:-}"
+  local mode rate
+  case "$choice" in
+    4k)    mode="3840x2160"; rate="30" ;;
+    1080p) mode="1920x1080"; rate="60" ;;
+    ""|list)
+      say "current mode on ${output}"
+      x_env xrandr | awk -v o="$output" '$1 == o, /^[A-Z]/ && $1 != o'         | grep -E '\*|connected' | head -3
+      say "choices"
+      info "--display 4k     3840x2160 at 30 Hz"
+      info "--display 1080p  1920x1080 at 60 Hz (default)"
+      return 0
+      ;;
+    *) die "unknown display choice: ${choice} (expected 4k or 1080p)" ;;
+  esac
+
+  say "display"
+  # Refuse a mode the TV does not advertise rather than leaving a black screen behind.
+  if ! x_env xrandr | grep -qE "^\s+${mode}\s"; then
+    die "${output} does not offer ${mode}; run --display with no argument to see the list"
+  fi
+
+  x_env xrandr --output "$output" --mode "$mode" --rate "$rate"     || die "xrandr rejected ${mode} at ${rate} Hz on ${output}"
+  info "${output} now ${mode} at ${rate} Hz"
+
+  # Persist for the next session. .xinitrc reads this file on start.
+  local conf="${home}/${DISPLAY_CONF_REL}"
+  mkdir -p "$(dirname "$conf")"
+  cat > "$conf" <<EOF
+# Written by tv-kiosk.sh --display. Applied by .xinitrc at session start.
+OUTPUT=${output}
+MODE=${mode}
+RATE=${rate}
+EOF
+  chown -R "${KIOSK_USER}:${KIOSK_USER}" "${home}/.config"
+  info "saved to ${conf}"
+
+  # Regenerate .xinitrc too. Saving the mode is only half of persistence: a session
+  # file written before this feature existed has no idea the conf file is there, and
+  # the TV silently reverts on the next restart. write_session is idempotent.
+  write_session
 }
 
 # ---------------------------------------------------------------- audio
@@ -436,15 +553,17 @@ main() {
     # `if` rather than `check; exit $?`, so errexit does not swallow the reporting.
     --check)     if check; then exit 0; else exit 1; fi ;;
     --audio)     fix_audio; exit 0 ;;
+    --display)   set_display "${2:-}"; exit 0 ;;
     --uninstall) uninstall; exit 0 ;;
     "")          ;;
-    *)           die "unknown argument: $1 (expected --check, --audio or --uninstall)" ;;
+    *)           die "unknown argument: $1 (expected --check, --audio, --display or --uninstall)" ;;
   esac
 
   preflight
   install_packages
   create_user
   install_app
+  write_display_default
   configure_wm
   write_session
   enable_autologin
