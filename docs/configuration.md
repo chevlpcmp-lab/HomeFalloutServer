@@ -195,3 +195,8 @@ The default manifest uses CPU transcoding. After passing the Intel iGPU through 
 `k3s-media-01`, add a `hostPath` volume for `/dev/dri`, mount it at `/dev/dri` in
 the Jellyfin container, and configure VA-API or QSV in Jellyfin. Confirm the worker sees the device
 before changing the manifest.
+
+This conflicts with the [TV console](tv-console.md). `k3s-media-01` is a VM, so it needs *exclusive*
+PCIe passthrough of the iGPU, and the TV session draws with that same device on the host. Pick one.
+While the TV console is in use the cost is small, because the TV direct-plays and never asks the
+server to transcode; CPU transcoding then only serves remote clients over the tailnet.

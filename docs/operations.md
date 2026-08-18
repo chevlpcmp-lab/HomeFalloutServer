@@ -181,7 +181,8 @@ kills, and Immich ML/Jellyfin concurrency. Practical tuning order:
 
 1. Avoid running Immich bulk indexing while Jellyfin is CPU transcoding.
 2. Limit background jobs in the application UIs if the media worker experiences memory pressure.
-3. Add Intel iGPU passthrough for Jellyfin before buying CPU capacity.
+3. Add Intel iGPU passthrough for Jellyfin before buying CPU capacity, unless the
+   [TV console](tv-console.md) is using the iGPU on the host; the two are mutually exclusive.
 4. Upgrade to 32 GB RAM before adding observability, more databases, or another large workload.
 5. Add an 8–16 TB CMR disk and external backup target before the NVMe fills.
 

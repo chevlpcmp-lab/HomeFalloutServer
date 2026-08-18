@@ -206,8 +206,9 @@ why the sealing key, databases, config volumes, and irreplaceable photos need of
 - **No shared ingress or certificate automation:** stable MetalLB addresses are simpler for a
   LAN-only lab; most application UIs remain plain HTTP.
 - **No three-node control plane:** the RAM cost does not buy physical availability on one host.
-- **No GPU passthrough yet:** Jellyfin currently transcodes on CPU; Intel iGPU passthrough is a
-  future optimization.
+- **No GPU passthrough yet:** Jellyfin currently transcodes on CPU. Intel iGPU passthrough is a
+  future optimization, and one the [TV console](tv-console.md) forecloses while it is in use: that
+  session draws on the host with the same device an exclusive passthrough would claim.
 - **No on-cluster observability stack:** current RAM is better reserved for Immich and playback.
 
 These are current design decisions, not permanent limitations. Add complexity when the hardware

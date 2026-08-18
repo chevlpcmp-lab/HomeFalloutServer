@@ -17,6 +17,7 @@ it when the gremlins arrive.
 | Create, rotate, audit, or recover secrets | [Secret management](secrets.md) |
 | Finish the app integrations | [First-run application wiring](configuration.md) |
 | Enable private remote access | [Tailscale subnet router](tailscale.md) |
+| Watch Jellyfin on the TV wired to the host | [TV console](tv-console.md) |
 | Prepare a fresh Proxmox host | [Proxmox prerequisites](proxmox-prerequisites.md) |
 
 ## System card
