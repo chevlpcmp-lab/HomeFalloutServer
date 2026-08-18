@@ -79,25 +79,53 @@ In AdGuard, **Filters → DNS rewrites**, add both:
 
 The wildcard does not cover the bare name, which is why both entries are needed.
 
-### 3. Point devices at it
+### 3. Check the router's DHCP pool
+
+Not optional, and unrelated to DNS. The pool must end at or below `10.0.0.199`, because
+`10.0.0.200-250` belongs to MetalLB: Traefik sits at `.201` and AdGuard at `.202`. On this network
+it shipped as `10.0.0.2` to `10.0.0.253`, which covered every service address and all three k3s VMs,
+and was corrected to `10.0.0.100-199`.
+
+Nothing had broken, because pools fill from the bottom. The failure it invites is a service becoming
+unreachable weeks later when a new device is handed an address a Service already holds, with nothing
+in the cluster looking wrong.
+
+### 4. Point devices at it
 
 Test one device first: set its DNS manually to `10.0.0.202`, confirm an ad-heavy page comes back
 cleaner and `http://jellyfin.home.lan` opens. Staging it this way matters because a mistake here
 takes the household's internet down, not just a service.
 
-To cover everyone, set the DHCP-advertised DNS server on the router at `http://10.0.0.1` to
-`10.0.0.202`. Devices pick it up on lease renewal; reconnecting Wi-Fi or rebooting the router makes
-it immediate.
+**The Videotron Helix cannot do this, so per-device is the path here.** Covering everyone at once
+would mean setting the DHCP-advertised DNS server on the router, and this gateway exposes no DNS
+field anywhere. Not under **Connection > Local IP Network**, which stops at DHCP start/end and lease
+time; not under **Connection > WAN Network**, which only selects Ethernet or DOCSIS WAN; and not
+under **Advanced**, which offers port forwarding, port triggering, remote management, DMZ, and
+device discovery. It is an XB-platform gateway and the setting is absent, not hidden behind a mode
+toggle.
 
-**Make AdGuard the only DNS server the router hands out.** The instinct to add a public resolver as
-a secondary for resilience backfires: clients do not treat a secondary as failover-only. Windows and
-Android query both and take whichever answers first, so ads leak through unpredictably and the
-filtering becomes a coin flip. If you want redundancy, the answer is a second AdGuard, not a
-non-filtering fallback.
+So each device is pointed at `10.0.0.202` individually:
 
-That means accepting a real cost deliberately: if the apps worker is down, nobody in the house
-resolves anything until you change the setting back. The router page is the escape hatch, and every
-service keeps its original IP so the lab itself stays reachable.
+| Platform | Where |
+| --- | --- |
+| Windows | `Set-DnsClientServerAddress -InterfaceAlias "Wi-Fi" -ServerAddresses 10.0.0.202` from an admin prompt |
+| iOS | Settings > Wi-Fi > (i) > Configure DNS > Manual |
+| Android | Long-press the network > Modify > Advanced > IP settings: Static > DNS 1 |
+| Smart TV | Network settings > Manual, changing DNS only |
+
+Also turn off **Private DNS** on Android and **Secure DNS** in Chrome. Both are DNS-over-HTTPS and
+bypass the system resolver entirely, so AdGuard never sees the query. Filtering then appears to have
+failed while the hostnames keep working, which is a confusing way to lose an hour.
+
+A device you skip simply does not get filtering. Nothing breaks, which makes this far less
+consequential to get wrong than a router-wide change would have been, and it means no single pod
+becomes responsible for whether the household has working DNS.
+
+**AdGuard's built-in DHCP server was considered and rejected.** It would cover every device by
+handing out leases and itself as DNS, but the Helix offers no way to disable its own DHCP, and two
+DHCP servers on one LAN is worse than the problem being solved. It would also need `hostNetwork` on
+the apps worker, since a MetalLB LoadBalancer does not carry broadcast DHCP discovery. Not worth
+putting the household's addressing on that to save some one-time setup.
 
 ## Before you flip the router
 
