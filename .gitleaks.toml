@@ -54,6 +54,14 @@ paths = ['''^platform/components/media-stack/resources/sealed-secret-comicvine\.
 regexes = ['''^\s+COMICVINE_API_KEY:\s+Ag[A-Za-z0-9+/=_-]{100,}\s*$''']
 
 [[allowlists]]
+description = "Overseer cluster-sealed ciphertext fields"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = ['''^platform/components/house/resources/sealed-secret-house-secrets\.yaml$''']
+regexes = ['''^\s+(HA_URL|HA_TOKEN|SESSION_SECRET):\s+Ag[A-Za-z0-9+/=_-]{100,}\s*$''']
+
+[[allowlists]]
 description = "Documented non-secret example placeholder"
 targetRules = ["generic-api-key"]
 regexes = ['''^REPLACE_WITH_64_HEX_CHARACTERS$''']

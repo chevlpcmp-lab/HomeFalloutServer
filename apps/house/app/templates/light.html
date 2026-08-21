@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}{{ light.name }} · Overseer{% endblock %}
+{% block content %}
+<span id="syncflag" hidden data-on="{{ '1' if state.sync.on else '0' }}"></span>
+
+<div class="devrow">
+  <a class="circ" href="/lights" aria-label="Back to lights">{{ icon("back", 20) }}</a>
+  <div class="devpill">{{ light.name }}</div>
+  <button class="circ" data-light-off="{{ light.slug }}" aria-label="Turn off"
+          {{ 'disabled' if light.held }}>{{ icon("off", 20) }}</button>
+</div>
+
+{% if light.held %}
+<div class="card">
+  <div class="note">
+    {{ icon("bolt", 17) }}
+    <span><b>The screen is driving this light.</b> Hue hands the bulb to sync, so colour
+    and brightness can't be set by hand right now.</span>
+  </div>
+  <div class="dim heldpreview">
+    <div class="cardhead"><span class="caplabel">Brightness</span></div>
+    <div class="track fat"><span style="width:{{ light.brightness or 38 }}%"></span></div>
+  </div>
+  <button class="bigbtn syncoff" data-sync-off>Turn sync off</button>
+</div>
+{% else %}
+<div class="card">
+  <div class="cardhead">
+    <span class="caplabel">Brightness</span>
+    <span class="volnum num" id="bripct">
+      {%- if light.brightness %}{{ light.brightness }}%{% elif light.on %}On{% else %}Off{% endif -%}
+    </span>
+  </div>
+  <div class="track fat" id="britrack" data-bri="{{ light.slug }}" role="slider" tabindex="0"
+       aria-label="Brightness" aria-valuemin="1" aria-valuemax="100"
+       aria-valuenow="{{ light.brightness or 0 }}">
+    <span id="brifill" style="width:{{ light.brightness or 0 }}%"></span>
+  </div>
+</div>
+
+<div class="card">
+  <div class="cardhead"><span class="caplabel">Colour</span></div>
+  <div class="swrow">
+    {% for colour in swatches %}
+    <button class="swb" data-color="{{ colour }}" data-light-color="{{ light.slug }}"
+            style="background:{{ colour }}" aria-label="Colour {{ colour }}"></button>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}

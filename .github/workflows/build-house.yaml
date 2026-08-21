@@ -1,0 +1,50 @@
+name: Build house image
+
+# Overseer is the repo's first self-built image. Every push that touches the app
+# builds and publishes ghcr.io/chevlpcmp-lab/house:<commit sha> — branches
+# included, so a PR can pin a sha that already exists in the registry by the time
+# it merges. Only main also moves :latest, and nothing deploys automatically:
+# the Deployment pins a sha, and a rollout is a deliberate one-line bump.
+on:
+  push:
+    paths:
+      - "apps/house/**"
+      - ".github/workflows/build-house.yaml"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: Build and push to GHCR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Sign in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Decide tags
+        id: tags
+        run: |
+          tags="ghcr.io/chevlpcmp-lab/house:${{ github.sha }}"
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            tags="$tags,ghcr.io/chevlpcmp-lab/house:latest"
+          fi
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/house
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

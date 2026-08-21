@@ -10,6 +10,11 @@ provisioning/ansible/kubeconfig
 .vscode/
 .tools/
 
+# Local Python/runtime artifacts.
+__pycache__/
+*.py[cod]
+apps/house/%SystemDrive%/
+
 # Never commit unencrypted Kubernetes secrets.
 platform/secrets/*.yaml
 !platform/secrets/*.example.yaml

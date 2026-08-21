@@ -22,7 +22,8 @@ if (-not (Test-Path -LiteralPath $Kubeconfig)) {
 $secretSources = @(
     (Join-Path $repoRoot 'platform\secrets\media-secrets.yaml'),
     (Join-Path $repoRoot 'platform\secrets\immich-secrets.yaml'),
-    (Join-Path $repoRoot 'platform\secrets\tailscale-secrets.yaml')
+    (Join-Path $repoRoot 'platform\secrets\tailscale-secrets.yaml'),
+    (Join-Path $repoRoot 'platform\secrets\house-secrets.yaml')
 )
 $secretDestinations = @{
     'gluetun-vpn' = Join-Path $repoRoot 'platform\components\media-stack\resources'
@@ -31,6 +32,7 @@ $secretDestinations = @{
     'homarr-secrets' = Join-Path $repoRoot 'platform\components\homarr\resources'
     'immich-database' = Join-Path $repoRoot 'platform\components\immich\resources'
     'tailscale-auth' = Join-Path $repoRoot 'platform\components\tailscale\resources'
+    'house-secrets' = Join-Path $repoRoot 'platform\components\house\resources'
 }
 
 foreach ($secretSource in $secretSources) {

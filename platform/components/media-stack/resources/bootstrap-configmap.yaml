@@ -58,6 +58,7 @@ data:
         "komga":       "http://10.0.0.239:25600",
         "immich":      "http://10.0.0.240",
         "remote":      "http://10.0.0.241:8123",
+        "house":       "http://10.0.0.242",
     }
     # Cluster-internal URLs Homarr's server uses for its integrations.
     SVC = {
@@ -1309,6 +1310,8 @@ data:
             "Komga":       (f"{ICONS}/svg/komga.svg",       LAN["komga"],       "Comic reader"),
             "Immich":      (f"{ICONS}/svg/immich.svg",      LAN["immich"],      "Photos"),
             "Remote":      (f"{ICONS}/svg/home-assistant.svg", LAN["remote"], "TV and lights remote"),
+            # Overseer serves its own mark, so the tile has no third-party icon.
+            "Overseer":    (f"{LAN['house']}/static/icon.svg", LAN["house"], "The living room, per person"),
         }
         existing_apps = {a["name"] for a in homarr_rest("GET", "/api/apps")}
         for name, (icon, href, desc) in tiles.items():

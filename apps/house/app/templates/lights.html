@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Lights · Overseer{% endblock %}
+{% block content %}
+<span id="syncflag" hidden data-on="{{ '1' if state.sync.on else '0' }}"></span>
+
+<div class="hero">
+  <h1 class="hero-h">Good {{ daypart }},<br>{{ user.display_name }}</h1>
+  <p class="hero-s" id="summary">{{ state.summary }}</p>
+</div>
+
+{% if state.rooms | length > 1 %}
+<div class="chips">
+  <button class="chip2 on" data-chip="all">All</button>
+  {% for room in state.rooms %}
+  <button class="chip2" data-chip="{{ room.key }}">{{ room.name }}</button>
+  {% endfor %}
+</div>
+{% endif %}
+
+{# Ambient sync rides with the living room, which everyone can see. #}
+{% if state.rooms | selectattr("key", "equalto", "living_room") | list %}
+<div class="card synccard" data-room-card="living_room">
+  <div class="cardhead">
+    <span class="caplabel accent">Ambient sync</span>
+    {% if state.sync.reachable %}
+    <button class="swtch{{ ' on' if state.sync.on }}" data-sync data-on="{{ '1' if state.sync.on else '0' }}"
+            aria-label="Ambient sync" aria-pressed="{{ 'true' if state.sync.on else 'false' }}"><i></i></button>
+    {% endif %}
+  </div>
+  <div class="syncbody">
+    <span class="orb big{{ ' on' if state.sync.on }}">{{ icon("bolt", 24) }}</span>
+    <div>
+      <div class="lname">
+        {%- if not state.sync.reachable %}Hyperion isn't answering
+        {%- elif state.sync.on %}Following the screen
+        {%- else %}Off{% endif -%}
+      </div>
+      <div class="lsub">Living room wall</div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% for room in state.rooms %}
+<div class="card roomcard{{ ' heldroom' if room.held }}" data-room-card="{{ room.key }}">
+  <div class="cardhead">
+    <span class="caplabel">{{ room.name }}</span>
+    <button class="swtch{{ ' on' if room.on }} roomctl" data-room="{{ room.key }}"
+            data-on="{{ '1' if room.on else '0' }}" aria-label="All of {{ room.name }}"
+            aria-pressed="{{ 'true' if room.on else 'false' }}"><i></i></button>
+  </div>
+  {% if room.held %}
+  <div class="note">
+    {{ icon("bolt", 17) }}
+    <span><b>The screen is driving this light.</b> Hue hands the bulb to sync, so colour
+    and brightness can't be set by hand right now.</span>
+  </div>
+  {% endif %}
+  {% for light in room.lights %}
+  <div class="lightrow">
+    <a class="lmeta" href="/lights/{{ light.slug }}">
+      <span class="lname">{{ light.name }}</span>
+      <span class="lsub" data-sub="{{ light.slug }}">{{ light.sub }}</span>
+    </a>
+    <button class="orb{{ ' on' if light.on }} roomctl" data-light="{{ light.slug }}"
+            data-on="{{ '1' if light.on else '0' }}" aria-label="{{ light.name }}"
+            aria-pressed="{{ 'true' if light.on else 'false' }}">{{ icon("bulb", 21) }}</button>
+  </div>
+  {% endfor %}
+  {% if room.held %}
+  <button class="bigbtn syncoff" data-sync-off>Turn sync off</button>
+  {% endif %}
+</div>
+{% endfor %}
+
+<form method="post" action="/logout" class="signout">
+  <button type="submit">Sign out</button>
+</form>
+{% endblock %}

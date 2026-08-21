@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block content %}
+{% set tv = state.tv %}
+{% set usable = tv.reachable and tv.on %}
+
+<div class="devrow">
+  <button class="circ danger" data-tv="power" aria-label="TV power">{{ icon("power", 21) }}</button>
+  <div class="devpill"><span class="dot{{ ' live' if tv.on }}" id="tvdot"></span> {{ tv.name }}</div>
+  <button class="circ{{ ' on' if tv.muted }}" data-tv="mute" aria-label="Mute"
+          aria-pressed="{{ 'true' if tv.muted else 'false' }}" {{ 'disabled' if not usable }}>
+    {{ icon("mute" if tv.muted else "vol", 21) }}
+  </button>
+</div>
+
+<p class="hint{{ ' gone' if usable }}" id="tvhint" role="status">
+  {%- if not tv.reachable %}Home Assistant isn't answering, so nothing here will work right now.
+  {%- elif not tv.on %}The TV is asleep. Power will wake it.{% endif -%}
+</p>
+
+<div class="tvzone{{ ' dim' if not usable }}" id="tvzone">
+
+  <div class="seg">
+    <button class="segbtn{{ ' on' if usable and tv.source == 'HDMI' }}" data-source="jellyfin" id="src-jellyfin">
+      <span class="t">Jellyfin</span><span class="s">HDMI 1</span>
+    </button>
+    <button class="segbtn{{ ' on' if usable and tv.source == 'TV' }}" data-source="tv" id="src-tv">
+      <span class="t">TV</span><span class="s">Antenna</span>
+    </button>
+  </div>
+
+  <div class="padwrap">
+    <button class="sat tl" data-key="KEY_HOME" aria-label="Home">{{ icon("home", 18) }}</button>
+    <button class="sat tr" data-key="KEY_SOURCE" aria-label="Source">{{ icon("src", 18) }}</button>
+    <div class="disc">
+      <button class="arw up" data-key="KEY_UP" aria-label="Up">{{ icon("up", 22) }}</button>
+      <button class="arw lf" data-key="KEY_LEFT" aria-label="Left">{{ icon("lf", 22) }}</button>
+      <button class="ok" data-key="KEY_ENTER">OK</button>
+      <button class="arw rt" data-key="KEY_RIGHT" aria-label="Right">{{ icon("rt", 22) }}</button>
+      <button class="arw dn" data-key="KEY_DOWN" aria-label="Down">{{ icon("dn", 22) }}</button>
+    </div>
+    <button class="sat bl" data-key="KEY_RETURN" aria-label="Back">{{ icon("back", 18) }}</button>
+    <button class="sat br" data-key="KEY_MENU" aria-label="Menu">{{ icon("menu", 18) }}</button>
+  </div>
+
+  <div class="vol">
+    <div class="volhead">
+      <span class="lbl">{{ icon("vol", 16) }} Volume</span>
+      <span class="volnum num" id="volnum">{{ tv.volume if tv.volume is not none else '—' }}</span>
+    </div>
+    <div class="volrow">
+      <button class="circ" data-vol="-1" aria-label="Volume down">{{ icon("minus", 20) }}</button>
+      <div class="track" id="voltrack" role="slider" tabindex="0" aria-label="Volume"
+           aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ tv.volume or 0 }}">
+        <span id="volfill" style="width:{{ tv.volume or 0 }}%"></span>
+        <b id="volthumb" style="left:{{ tv.volume or 0 }}%{{ ';display:none' if tv.volume is none }}"></b>
+      </div>
+      <button class="circ" data-vol="1" aria-label="Volume up">{{ icon("plus", 20) }}</button>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

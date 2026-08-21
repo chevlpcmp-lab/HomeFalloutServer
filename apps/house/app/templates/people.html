@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}People · Overseer{% endblock %}
+{% block content %}
+<div class="hero">
+  <h1 class="hero-h">People</h1>
+  <p class="hero-s">{{ account_word }} accounts · you're the admin</p>
+</div>
+
+{% if revealed %}
+<div class="card revealcard">
+  <div class="cardhead"><span class="caplabel accent">{{ revealed.name }}'s new password</span></div>
+  <div class="otp num">{{ revealed.password }}</div>
+  <p class="lsub">Shown once. They'll be asked to choose their own at first sign-in.</p>
+</div>
+{% endif %}
+
+<div class="card">
+  {% for row in people %}
+  {% set person = row.user %}
+  <a class="lightrow person{{ ' sel' if selected and selected.user.id == person.id }}"
+     {% if not person.is_admin %}href="/people?u={{ person.username }}"{% endif %}>
+    <span class="pmeta">
+      <span class="avatar" style="background:{{ avatar_colors.get(person.username, '#5A5F6B') }}">
+        {{- person.display_name[:1] -}}
+      </span>
+      <span class="lmeta">
+        <span class="lname">{{ person.display_name }}</span>
+        <span class="lsub">{{ row.sub }}</span>
+      </span>
+    </span>
+    {% if person.is_admin %}
+    <span class="orb on still">{{ icon("users", 19) }}</span>
+    {% else %}
+    <span class="chev">{{ icon("rt", 18) }}</span>
+    {% endif %}
+  </a>
+  {% endfor %}
+</div>
+
+{% if selected %}
+<div class="card">
+  <div class="cardhead"><span class="caplabel">{{ selected.user.display_name }} can control</span></div>
+  {% for room in all_rooms %}
+  <div class="lightrow">
+    <span class="lname">{{ room.name }}</span>
+    <button class="swtch{{ ' on' if room.key in selected.rooms }}" data-perm
+            data-user="{{ selected.user.id }}" data-room="{{ room.key }}"
+            data-on="{{ '1' if room.key in selected.rooms else '0' }}"
+            aria-label="{{ room.name }} for {{ selected.user.display_name }}"
+            aria-pressed="{{ 'true' if room.key in selected.rooms else 'false' }}"><i></i></button>
+  </div>
+  {% endfor %}
+</div>
+
+<form method="post" action="/people/{{ selected.user.id }}/reset">
+  <button class="bigbtn ghost" type="submit">Reset {{ selected.user.display_name }}'s password</button>
+</form>
+{% endif %}
+{% endblock %}

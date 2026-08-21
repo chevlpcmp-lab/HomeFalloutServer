@@ -148,13 +148,26 @@ components:
     resources:
       enabled: true
 
+  # Overseer (10.0.0.242, house.home.lan): the housemates' own remote. A small
+  # FastAPI app from apps/house that drives the TV, the Hue rooms, and ambient
+  # sync through Home Assistant, with per-person logins and per-room permissions.
+  # First self-built image in the repo - ghcr.io/chevlpcmp-lab/house, pinned by
+  # sha in the component.
+  - name: house
+    tier: apps
+    waveOffset: 11
+    namespace: media
+    project: applications
+    resources:
+      enabled: true
+
   # Hostnames for everything, synced last because each rule names a Service that the
   # components above create. Uses the infrastructure project: its rules span the
   # media, photos, argocd, and networking namespaces, which the applications project
   # is not allowed to touch.
   - name: ingress
     tier: apps
-    waveOffset: 10
+    waveOffset: 12
     namespace: media
     resources:
       enabled: true

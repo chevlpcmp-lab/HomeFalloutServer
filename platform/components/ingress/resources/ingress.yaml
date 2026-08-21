@@ -35,6 +35,13 @@ spec:
       http:
         paths:
           - { path: /, pathType: Prefix, backend: { service: { name: komga, port: { number: 25600 } } } }
+    # Overseer, the housemates' remote: TV, lights, and ambient sync with
+    # per-person logins. Passwords cross this rule in plain HTTP like every other
+    # name here - a LAN-only trade, noted in docs/overseer.md.
+    - host: house.home.lan
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: house, port: { number: 80 } } } }
     # The remote. Named for what it does rather than what it is, because this is a
     # name roommates have to remember and "home-assistant" is not one.
     - host: remote.home.lan
