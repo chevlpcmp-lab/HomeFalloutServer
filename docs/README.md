@@ -20,6 +20,7 @@ it when the gremlins arrive.
 | Use hostnames instead of IPs, or block ads | [DNS and ingress](dns-and-ingress.md) |
 | Watch Jellyfin on the TV wired to the host | [TV console](tv-console.md) |
 | Drive the TV, lights, and Jellyfin from a phone | [Household remote](remote.md) |
+| Light the room from what the TV is showing | [Ambient lighting](ambient-lighting.md) |
 | Prepare a fresh Proxmox host | [Proxmox prerequisites](proxmox-prerequisites.md) |
 
 ## System card
