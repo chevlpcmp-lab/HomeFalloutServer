@@ -90,7 +90,8 @@ Jellyfin refreshes after imports and renames.
 | Radarr / Sonarr **Settings > Indexers** | Indexers synchronized from Prowlarr |
 | Radarr / Sonarr **Settings > Connect** | `Jellyfin` library-update connection |
 | Prowlarr **Settings > Apps** | `Radarr`, `Sonarr`, and `Mylar`, all set to Full Sync |
-| Prowlarr **Settings > Indexers** | EZTV, LimeTorrents, Nyaa.si, and YTS |
+| Prowlarr **Settings > Indexers** | EZTV, LimeTorrents, Nyaa.si, YTS, and Torrent9 |
+| Radarr / Sonarr **Custom Formats** | `MULTi (EN+FR audio)` (+100) and `French-only audio` (−1000), scored in every quality profile |
 | Prowlarr **Settings > Indexers > Proxies** | `FlareSolverr` |
 | Seerr **Settings > Services** | Default Radarr and Sonarr instances |
 | Maintainerr **Settings** | Jellyfin, Radarr, Sonarr, Seerr, and qBittorrent |
@@ -107,8 +108,15 @@ Sous-Titres.eu improves French coverage, and SubF2M is the general fallback. An 
 SubDL account can be added later for broader coverage, but neither credential is required for the
 deployed baseline.
 
-The Git-owned baseline uses four public, credential-free indexers: EZTV and Nyaa.si for TV coverage,
-YTS for compact movies, and LimeTorrents as a broad fallback. Because the Applications are
+The Git-owned baseline uses five public, credential-free indexers: EZTV and Nyaa.si for TV coverage,
+YTS for compact movies, LimeTorrents as a broad fallback, and Torrent9 (behind FlareSolverr) for
+French coverage. Torrent9 is what makes the French-audio preference real: the four English-oriented
+indexers almost never carry `MULTI` releases. The custom formats in Radarr and Sonarr then steer
+selection — a release tagged `MULTI` (English + French audio) scores +100 so it wins over an
+otherwise-equal English-only release, while `FRENCH`/`VFF`/`VFQ`/`TRUEFRENCH` (French-only audio)
+scores −1000, below the minimum, so an English track is never lost to a dub-only release. `VOSTFR`
+(original audio, French subs) is deliberately neutral. The `FRENCH` pattern is case-sensitive so
+titles like *The French Dispatch* are not caught; verified against Radarr's parser on 2026-08-21. Because the Applications are
 reconciled to Full Sync, Prowlarr publishes them to Radarr and Sonarr automatically. FlareSolverr is
 available to compatible indexers. Private trackers and providers requiring accounts remain an
 intentional manual extension unless their credentials are added through a SealedSecret and their

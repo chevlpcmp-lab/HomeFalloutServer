@@ -460,6 +460,9 @@ data:
                 "baseSettings.limitsUnit": 0,
                 "apiurl": "movies-api.accel.li",
             }, []),
+            # French coverage: the only baseline indexer carrying MULTI (EN+FR
+            # audio) releases, which the Radarr/Sonarr custom formats prefer.
+            ("Torrent9", "torrent9", 5, {"baseSettings.limitsUnit": 0}, [flared["id"]]),
         ]
         existing_indexers = get(f"{PROWLARR_URL}/api/v1/indexer", prowlarr_key)
         schemas = get(f"{PROWLARR_URL}/api/v1/indexer/schema", prowlarr_key)
