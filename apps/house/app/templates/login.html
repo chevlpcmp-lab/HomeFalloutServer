@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Sign in · Overseer{% endblock %}
+{% block content %}
+<div class="gate">
+  <div class="gate-head">
+    <span class="mark">{{ icon("bolt", 30) }}</span>
+    <h1 class="hero-h">Overseer</h1>
+    <p class="hero-s">Four residents</p>
+  </div>
+  {% if error %}<p class="formerr" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="/login" class="gate-form">
+    <div class="field">
+      <label for="f-name">Name</label>
+      <input class="inp" id="f-name" name="username" autocomplete="username"
+             autocapitalize="none" autocorrect="off" spellcheck="false" required autofocus>
+    </div>
+    <div class="field">
+      <label for="f-pass">Password</label>
+      <input class="inp" id="f-pass" name="password" type="password"
+             autocomplete="current-password" required>
+    </div>
+    <button class="bigbtn" type="submit">Sign in</button>
+  </form>
+  <p class="gate-foot">No account? Ask Charles.</p>
+</div>
+{% endblock %}

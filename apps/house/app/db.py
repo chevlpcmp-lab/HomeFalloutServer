@@ -23,6 +23,9 @@ from dataclasses import dataclass
 SCRYPT_N = 2**15
 SCRYPT_R = 8
 SCRYPT_P = 1
+# These parameters need 128*n*r bytes = 32 MiB, which is exactly OpenSSL's default
+# memory cap — so without a higher maxmem every hash raises "memory limit exceeded".
+SCRYPT_MAXMEM = 64 * 1024 * 1024
 SESSION_TTL = 30 * 24 * 3600  # a month; this is a light switch, not a bank
 
 SCHEMA = """
@@ -88,7 +91,7 @@ class Store:
     def hash_password(password: str, salt: bytes) -> bytes:
         return hashlib.scrypt(
             password.encode("utf-8"), salt=salt, n=SCRYPT_N, r=SCRYPT_R, p=SCRYPT_P,
-            dklen=64,
+            maxmem=SCRYPT_MAXMEM, dklen=64,
         )
 
     def set_password(self, user_id: int, password: str, must_change: bool = False) -> None:
