@@ -1,0 +1,94 @@
+# Overseer: the living room, on a phone.
+#
+# Home Assistant (the component this one leans on) is the household's remote, but
+# it is an admin tool wearing a remote's clothes. This is the app the housemates
+# actually open: TV power, source, D-pad and volume, the Hue lights by room, and
+# the ambient-sync toggle - with per-person logins and per-room permissions
+# enforced in its request handlers. apps/house holds the code and build brief.
+#
+# It talks only to Home Assistant (one long-lived token from the house-secrets
+# SealedSecret) and to Hyperion's JSON-RPC port for the sync toggle. It never
+# speaks to the TV or the Hue bridge directly, so new devices become HA
+# integrations rather than new code here.
+#
+# First self-built image in this repo: GitHub Actions publishes
+# ghcr.io/chevlpcmp-lab/house on every push touching apps/house/**, and this
+# Deployment pins a specific sha tag so a rollout is a deliberate one-line bump,
+# not a side effect of someone else's push.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: house-data
+  namespace: media
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: config-local-retain
+  resources: { requests: { storage: 1Gi } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: house
+  namespace: media
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: house }
+  template:
+    metadata:
+      labels: { app: house }
+    spec:
+      # The apps pool: config-local-retain is node-local, and the SQLite file
+      # (users, sessions, permissions) only exists on the node that bound it.
+      nodeSelector:
+        homelab.charles/pool: apps
+      # The image runs as uid 10001; this makes the PVC writable to it.
+      securityContext:
+        fsGroup: 10001
+      containers:
+        - name: house
+          image: ghcr.io/chevlpcmp-lab/house:d8e30b4dc43954b4d5295b8a30d42c431a9ab57d
+          env:
+            - { name: TZ, value: America/Toronto }
+            - { name: HOUSE_DB, value: /data/house.db }
+            # Hyperion lives on the Proxmox host, outside the cluster.
+            - { name: HYPERION_URL, value: "http://10.0.0.254:8090/json-rpc" }
+          envFrom:
+            # HA_URL, HA_TOKEN, SESSION_SECRET - see docs/secrets.md.
+            - secretRef: { name: house-secrets }
+          ports:
+            - { name: http, containerPort: 8000 }
+          startupProbe:
+            httpGet: { path: /healthz, port: 8000 }
+            periodSeconds: 5
+            failureThreshold: 12
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8000 }
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8000 }
+            periodSeconds: 30
+            failureThreshold: 5
+          volumeMounts:
+            - { name: data, mountPath: /data }
+          resources:
+            # Tiny at rest; the ceiling covers scrypt, which takes 32 MiB per
+            # concurrent login on purpose.
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: "1", memory: 512Mi }
+      volumes:
+        - { name: data, persistentVolumeClaim: { claimName: house-data } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: house
+  namespace: media
+  annotations:
+    metallb.io/loadBalancerIPs: "10.0.0.242"
+spec:
+  type: LoadBalancer
+  selector: { app: house }
+  ports:
+    - { name: http, port: 80, targetPort: 8000 }
