@@ -66,6 +66,11 @@ def _icon(name: str, size: int = 20) -> Markup:
 
 templates.env.globals["icon"] = _icon
 
+# StaticFiles sends no Cache-Control, so browsers may reuse a cached app.js
+# without revalidating — a broken cached copy then survives ordinary reloads.
+# A per-process token on the asset URLs makes every deploy a fresh fetch.
+templates.env.globals["asset_v"] = secrets.token_hex(4)
+
 
 def _seed_if_empty(store: Store) -> None:
     if store.all_users():

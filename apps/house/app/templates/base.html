@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
-  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/app.css?v={{ asset_v }}">
 </head>
 <body data-page="{{ page|default('') }}">
 {% include "_icons.html" %}
@@ -27,6 +27,6 @@
 </nav>
 {% endif %}
 {% endblock %}
-<script src="/static/app.js" defer></script>
+<script src="/static/app.js?v={{ asset_v }}" defer></script>
 </body>
 </html>
