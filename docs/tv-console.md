@@ -146,8 +146,12 @@ Turn the TV on, pick the input, use the arrow keys and Enter. That is the whole 
 | Repoint audio at HDMI after an audio change | `bash /root/tv-kiosk.sh --audio` |
 | Switch resolution | `bash /root/tv-kiosk.sh --display 4k` or `1080p` |
 
-The player should also register as a Jellyfin session, so it can be cast to and controlled from the
-Jellyfin phone app when the keyboard is out of reach. That has not been verified on this host.
+The player registers as a Jellyfin session, so it can be cast to and controlled from the Jellyfin
+phone app when the keyboard is out of reach. Verified on this host 2026-08-20: it appears in
+`/Sessions` as client `Jellyfin Desktop`, device `home`, with `SupportsRemoteControl: true`.
+
+Because the picture is rendered on this host, software here can also read it and drive the Hue
+lights from it — see [Ambient lighting](ambient-lighting.md).
 
 The keyboard is no longer the only way to drive this. [The household remote](remote.md) controls the
 TV itself — power, volume, input — and Jellyfin playback, from any phone or laptop in the house.

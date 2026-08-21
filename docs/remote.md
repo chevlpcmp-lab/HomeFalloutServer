@@ -129,8 +129,16 @@ answers WebSockets is off. That needs Wake-on-LAN, and on Samsung sets it needs 
 first: **Settings → General (or General & Privacy) → Network → Expert Settings → Power On with
 Mobile**.
 
-With that on, add the **Wake on LAN** integration pointed at `64:E7:D8:36:52:60` — the TV's Wi-Fi
-MAC, read from its own API — and set it as the `turn_on` action for the TV.
+The Home Assistant side usually needs nothing. The Samsung integration ships `wakeonlan` as its own
+dependency and sends the magic packet itself when `turn_on` is called on the TV entity, using the
+MAC it learned at setup. Try that before adding anything.
+
+If it does not work, add the separate **Wake on LAN** integration pointed at `64:E7:D8:36:52:60` —
+the TV's Wi-Fi MAC, read from its own API. It has a config flow, so it is added from **Settings →
+Devices & services → Add integration** like any other; no YAML.
+
+Note which of these lives where. *Power On with Mobile* is a firmware setting on the panel and can
+only be set with the TV's own remote. Home Assistant cannot reach it.
 
 Two things sink this in practice, so check them before concluding it is broken:
 
@@ -143,9 +151,23 @@ Two things sink this in practice, so check them before concluding it is broken:
 If power-on refuses to work, it is a small loss: the TV's own power button is the one button on the
 bad remote that works fine.
 
+## No add-ons here
+
+This runs the Home Assistant **container**, not Home Assistant OS, so the add-on store does not
+exist — no File Editor, no Terminal, no Studio Code Server. Nearly everything is UI-driven and this
+rarely bites, but a file edit means going in through the pod:
+
+```powershell
+./scripts/k.ps1 -n media exec -it deploy/home-assistant -c home-assistant -- vi /config/configuration.yaml
+```
+
+`vi` is the only editor in the image. A restart to pick up a config change is
+`./scripts/k.ps1 -n media rollout restart deploy/home-assistant`.
+
 ## Adding the lights and Jellyfin
 
-**Hue** — `10.0.0.144`, discovered automatically. Press the physical link button on the bridge when
+**Hue** — `10.0.0.144`, discovered automatically. For lights that follow what is on screen
+rather than just switching with it, see [Ambient lighting](ambient-lighting.md). Press the physical link button on the bridge when
 asked. All local, no Philips cloud account.
 
 **Jellyfin** — add by URL, `http://jellyfin.media.svc.cluster.local:8096`, with a normal user
