@@ -169,6 +169,24 @@ The `immich-database` SealedSecret supplies the server and Postgres with matchin
 Photo originals live under `/mnt/data/photos`; the database must be backed up separately because
 the files alone do not reconstruct albums, users, or metadata.
 
+## Home Assistant
+
+Home Assistant is the household remote: one web app that drives the Samsung TV, the Hue bridge, and
+Jellyfin, with its own non-admin logins for roommates. See [Household remote](remote.md).
+
+| Property | Value |
+| --- | --- |
+| Placement | `k3s-apps-01` via pool label `apps` |
+| LAN address | `http://10.0.0.241:8123`, and `remote.home.lan` through Traefik |
+| Networking | `hostNetwork` — SSDP/mDNS discovery and Wake-on-LAN cannot cross the pod network |
+| Configuration | 5 Gi retained local PVC mounted at `/config` |
+| Seeding | Init container writes `configuration.yaml` once, with the cluster CIDRs as trusted proxies |
+| Resources | request `100m / 512Mi`; limit `2 CPU / 2Gi` |
+
+`hostNetwork` is the notable choice and it has a standing consequence: nothing else may bind `8123`
+on the apps node. Without it the TV and the Hue bridge are invisible to discovery and the TV cannot
+be woken at all.
+
 ## Supporting controllers
 
 ### MetalLB

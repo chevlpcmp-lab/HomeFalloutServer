@@ -35,6 +35,12 @@ spec:
       http:
         paths:
           - { path: /, pathType: Prefix, backend: { service: { name: komga, port: { number: 25600 } } } }
+    # The remote. Named for what it does rather than what it is, because this is a
+    # name roommates have to remember and "home-assistant" is not one.
+    - host: remote.home.lan
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: home-assistant, port: { number: 8123 } } } }
     - host: seerr.home.lan
       http:
         paths:

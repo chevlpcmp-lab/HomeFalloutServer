@@ -137,6 +137,17 @@ components:
     resources:
       enabled: true
 
+  # The household remote (10.0.0.241). Talks to the Samsung TV, the Hue bridge, and
+  # Jellyfin, and hands roommates their own logins. Runs on hostNetwork - see the
+  # component for why - so it must not share a node with anything else on 8123.
+  - name: home-assistant
+    tier: apps
+    waveOffset: 9
+    namespace: media
+    project: applications
+    resources:
+      enabled: true
+
   # Hostnames for everything, synced last because each rule names a Service that the
   # components above create. Uses the infrastructure project: its rules span the
   # media, photos, argocd, and networking namespaces, which the applications project

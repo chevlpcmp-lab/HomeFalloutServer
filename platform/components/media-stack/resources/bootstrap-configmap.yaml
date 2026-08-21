@@ -57,6 +57,7 @@ data:
         "mylar":       "http://10.0.0.238",
         "komga":       "http://10.0.0.239:25600",
         "immich":      "http://10.0.0.240",
+        "remote":      "http://10.0.0.241:8123",
     }
     # Cluster-internal URLs Homarr's server uses for its integrations.
     SVC = {
@@ -1307,6 +1308,7 @@ data:
             "Mylar":       (f"{ICONS}/png/mylar.png",       LAN["mylar"],       "Comic requests and automation"),
             "Komga":       (f"{ICONS}/svg/komga.svg",       LAN["komga"],       "Comic reader"),
             "Immich":      (f"{ICONS}/svg/immich.svg",      LAN["immich"],      "Photos"),
+            "Remote":      (f"{ICONS}/svg/home-assistant.svg", LAN["remote"], "TV and lights remote"),
         }
         existing_apps = {a["name"] for a in homarr_rest("GET", "/api/apps")}
         for name, (icon, href, desc) in tiles.items():
