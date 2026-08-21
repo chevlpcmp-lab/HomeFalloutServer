@@ -99,6 +99,7 @@ exposure, or TLS termination.
 | [`10.0.0.238`](http://10.0.0.238) | Mylar | Comic automation | Gluetun VPN |
 | [`10.0.0.239:25600`](http://10.0.0.239:25600) | Komga | Comic reading | Direct LAN |
 | [`10.0.0.240`](http://10.0.0.240) | Immich | Photo and video backup | Direct LAN |
+| [`10.0.0.241:8123`](http://10.0.0.241:8123) | Home Assistant | TV, lights, and playback remote | Direct LAN |
 
 FlareSolverr is deliberately cluster-internal at `flaresolverr.media.svc.cluster.local:8191`.
 

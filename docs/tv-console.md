@@ -149,6 +149,9 @@ Turn the TV on, pick the input, use the arrow keys and Enter. That is the whole 
 The player should also register as a Jellyfin session, so it can be cast to and controlled from the
 Jellyfin phone app when the keyboard is out of reach. That has not been verified on this host.
 
+The keyboard is no longer the only way to drive this. [The household remote](remote.md) controls the
+TV itself — power, volume, input — and Jellyfin playback, from any phone or laptop in the house.
+
 To see what is actually on the TV without walking to it, `scrot` is installed:
 
 ```bash

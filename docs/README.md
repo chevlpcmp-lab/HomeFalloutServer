@@ -19,6 +19,7 @@ it when the gremlins arrive.
 | Enable private remote access | [Tailscale subnet router](tailscale.md) |
 | Use hostnames instead of IPs, or block ads | [DNS and ingress](dns-and-ingress.md) |
 | Watch Jellyfin on the TV wired to the host | [TV console](tv-console.md) |
+| Drive the TV, lights, and Jellyfin from a phone | [Household remote](remote.md) |
 | Prepare a fresh Proxmox host | [Proxmox prerequisites](proxmox-prerequisites.md) |
 
 ## System card

@@ -1,0 +1,137 @@
+# Home Assistant: the household's remote control.
+#
+# This exists because the TV's own remote is unpleasant and nobody wants to walk to the
+# coffee-table keyboard that drives the Jellyfin kiosk (docs/tv-console.md). Home
+# Assistant turns a phone or laptop browser into a real remote - power, volume, input,
+# D-pad - and unlike a hand-rolled page it already speaks every protocol in this house:
+# the Samsung TV's Tizen WebSocket API, the Hue bridge, and Jellyfin.
+#
+# It also has its own user accounts, which is the part that matters for a shared house:
+# roommates get logins without getting the admin of anything. Same model as Charlotte's
+# Jellyfin account - see docs/configuration.md.
+#
+# It lives in the `media` namespace rather than one of its own. It is not strictly a
+# media app, but a namespace costs a Namespace object, a project destination, and a
+# second place to look, and this controls the TV more than it controls anything else.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: home-assistant-config
+  namespace: media
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: config-local-retain
+  resources: { requests: { storage: 5Gi } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: home-assistant
+  namespace: media
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: home-assistant }
+  template:
+    metadata:
+      labels: { app: home-assistant }
+    spec:
+      # The apps pool, with AdGuard and Homarr, because config-local-retain is
+      # node-local: the config only exists on the node that first bound the claim.
+      nodeSelector:
+        homelab.charles/pool: apps
+      # The one genuinely unusual thing in this file, and the whole reason it works.
+      #
+      # Home Assistant finds devices with SSDP and mDNS, which are multicast and do not
+      # cross the pod network - from inside 10.42.0.0/16 the TV and the Hue bridge are
+      # simply invisible, and every integration has to be added by hand by IP. Worse,
+      # turning the TV *on* is a Wake-on-LAN magic packet, which is a broadcast to the
+      # LAN itself and cannot be sent from a NATed pod at all.
+      #
+      # The cost is that this pod binds 8123 directly on the apps node, so nothing else
+      # may claim that port, and Home Assistant sees the node's network with no
+      # isolation. For a household remote that is the trade worth making.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      initContainers:
+        # Home Assistant behind a reverse proxy answers "400 Bad Request" to every
+        # login until it is told which proxies to trust, and it will not accept that
+        # setting from anywhere but configuration.yaml. That file does not exist on a
+        # fresh volume, so seed it once - and only once. After first boot Home
+        # Assistant owns this file and an operator may edit it freely; this container
+        # checks for it and exits rather than overwriting anyone's work.
+        - name: seed-config
+          image: ghcr.io/home-assistant/home-assistant:2026.8.2
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              if [ -f /config/configuration.yaml ]; then
+                echo "configuration.yaml already present - leaving it alone"
+                exit 0
+              fi
+              mkdir -p /config
+              cat > /config/configuration.yaml <<'HA_EOF'
+              # Seeded once by platform/components/home-assistant. Home Assistant owns
+              # this file now - edits here survive, and the initContainer will not
+              # touch it again.
+              default_config:
+
+              http:
+                # Traefik terminates the *.home.lan names and forwards to this pod, so
+                # the client address arrives in X-Forwarded-For. Trust the cluster's
+                # own CIDRs and nothing else: widening this to the LAN would let any
+                # device in the house forge its own source address.
+                use_x_forwarded_for: true
+                trusted_proxies:
+                  - 10.42.0.0/16
+                  - 10.43.0.0/16
+              HA_EOF
+              echo "wrote /config/configuration.yaml"
+          volumeMounts:
+            - { name: config, mountPath: /config }
+      containers:
+        - name: home-assistant
+          image: ghcr.io/home-assistant/home-assistant:2026.8.2
+          env:
+            - { name: TZ, value: America/Toronto }
+          ports:
+            - { name: http, containerPort: 8123 }
+          # A first boot installs integration dependencies before it listens, and on a
+          # small VM that is minutes, not seconds. Sixty tries at ten seconds gives it
+          # ten minutes before the kubelet starts calling it a failure.
+          startupProbe:
+            tcpSocket: { port: 8123 }
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            tcpSocket: { port: 8123 }
+            periodSeconds: 15
+          livenessProbe:
+            tcpSocket: { port: 8123 }
+            periodSeconds: 30
+            failureThreshold: 5
+          volumeMounts:
+            - { name: config, mountPath: /config }
+          resources:
+            requests: { cpu: 100m, memory: 512Mi }
+            limits: { cpu: "2", memory: 2Gi }
+      volumes:
+        - { name: config, persistentVolumeClaim: { claimName: home-assistant-config } }
+---
+# A LoadBalancer for parity with every other app here, so the Homarr tile and the
+# household have one address that does not move. With hostNetwork above, the node's
+# own IP on 8123 works too - this is the stable name for it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: home-assistant
+  namespace: media
+  annotations:
+    metallb.io/loadBalancerIPs: "10.0.0.241"
+spec:
+  type: LoadBalancer
+  selector: { app: home-assistant }
+  ports:
+    - { name: http, port: 8123, targetPort: 8123 }
