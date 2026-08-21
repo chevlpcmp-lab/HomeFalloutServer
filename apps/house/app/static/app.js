@@ -351,7 +351,7 @@ if (britrack) {
     const step = { ArrowLeft: -5, ArrowDown: -5, ArrowRight: 5, ArrowUp: 5 }[e.key];
     if (step) {
       e.preventDefault();
-      setBriTarget((briTarget ?? parseInt(britrack.getAttribute("aria-valuenow"), 10) || 0) + step);
+      setBriTarget((briTarget ?? (parseInt(britrack.getAttribute("aria-valuenow"), 10) || 0)) + step);
     }
   });
 }
