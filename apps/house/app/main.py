@@ -2,8 +2,8 @@
 
 Server-rendered pages with a little JS on top. Every control action is a POST here,
 and every handler re-checks the caller's session and room permissions before it
-touches Home Assistant — the browser hides what you cannot use, but this file is
-what enforces it.
+touches Home Assistant, Jellyfin, or Hyperion — the browser hides what you cannot
+use, but this file is what enforces it.
 """
 
 from __future__ import annotations
@@ -26,6 +26,14 @@ from . import config
 from .db import SESSION_TTL, Store, User
 from .ha import HAError, HomeAssistant
 from .hyperion import Hyperion, HyperionError
+from .jellyfin import (
+    NAVIGATION_COMMANDS,
+    Jellyfin,
+    JellyfinError,
+    JellyfinSessionUnavailable,
+    PlaybackAction,
+    session_state as jellyfin_session_state,
+)
 from .rooms import (
     LIGHTS, REMOTE_KEYS, ROOMS, SWATCHES,
     TV_MEDIA_PLAYER, TV_NAME, TV_REMOTE, TV_SOURCES,
@@ -96,14 +104,19 @@ def _seed_if_empty(store: Store) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     config.require_ha_token()
+    config.require_jellyfin_key()
     app.state.store = Store(config.HOUSE_DB)
     _seed_if_empty(app.state.store)
     app.state.store.purge_expired_sessions()
     app.state.ha = HomeAssistant(config.HA_URL, config.HA_TOKEN)
     app.state.hyperion = Hyperion(config.HYPERION_URL)
+    app.state.jellyfin = Jellyfin(
+        config.JELLYFIN_URL, config.JELLYFIN_API_KEY, config.JELLYFIN_DEVICE_NAME
+    )
     yield
     await app.state.ha.aclose()
     await app.state.hyperion.aclose()
+    await app.state.jellyfin.aclose()
 
 
 app = FastAPI(title="Overseer", lifespan=lifespan)
@@ -213,14 +226,18 @@ def _light_state(states: dict | None, light: LightDef, held: bool) -> dict:
 async def gather_state(request: Request, user: User) -> dict:
     ha: HomeAssistant = request.app.state.ha
     hyperion: Hyperion = request.app.state.hyperion
-    states, sync_on = await asyncio.gather(
-        ha.states(), hyperion.is_on(), return_exceptions=True,
+    states, sync_on, jellyfin = await asyncio.gather(
+        ha.states(), hyperion.is_on(), request.app.state.jellyfin.state(),
+        return_exceptions=True,
     )
     ha_ok = not isinstance(states, BaseException)
     sync_ok = not isinstance(sync_on, BaseException)
+    jellyfin_ok = not isinstance(jellyfin, BaseException)
     if not ha_ok:
         states = None
     held = sync_ok and sync_on is True
+    if not jellyfin_ok:
+        jellyfin = jellyfin_session_state(None, reachable=False)
 
     tv_row = (states or {}).get(TV_MEDIA_PLAYER)
     tv_attrs = (tv_row or {}).get("attributes") or {}
@@ -256,6 +273,7 @@ async def gather_state(request: Request, user: User) -> dict:
             "source": tv_attrs.get("source"),
         },
         "sync": {"reachable": sync_ok, "on": sync_on if sync_ok else None},
+        "jellyfin": jellyfin,
         "rooms": rooms,
         "summary": summary,
     }
@@ -452,6 +470,10 @@ def _ha(request: Request) -> HomeAssistant:
     return request.app.state.ha
 
 
+def _jellyfin(request: Request) -> Jellyfin:
+    return request.app.state.jellyfin
+
+
 @app.exception_handler(HAError)
 async def _ha_error(request: Request, exc: HAError):
     return JSONResponse({"detail": str(exc)}, status_code=502)
@@ -459,6 +481,16 @@ async def _ha_error(request: Request, exc: HAError):
 
 @app.exception_handler(HyperionError)
 async def _hyperion_error(request: Request, exc: HyperionError):
+    return JSONResponse({"detail": str(exc)}, status_code=502)
+
+
+@app.exception_handler(JellyfinSessionUnavailable)
+async def _jellyfin_session_error(request: Request, exc: JellyfinSessionUnavailable):
+    return JSONResponse({"detail": str(exc)}, status_code=409)
+
+
+@app.exception_handler(JellyfinError)
+async def _jellyfin_error(request: Request, exc: JellyfinError):
     return JSONResponse({"detail": str(exc)}, status_code=502)
 
 
@@ -486,9 +518,17 @@ class KeyPress(BaseModel):
 async def tv_key(request: Request, press: KeyPress, user: User = Depends(api_user)):
     if press.key not in REMOTE_KEYS:
         raise HTTPException(400, "Unknown key")
+    # On the HDMI kiosk input, the circle controls Jellyfin itself. Source stays
+    # with Samsung so there is always a way back to antenna TV.
+    if press.key in NAVIGATION_COMMANDS:
+        row = await _ha(request).state(TV_MEDIA_PLAYER)
+        source = ((row or {}).get("attributes") or {}).get("source")
+        if source == TV_SOURCES["jellyfin"]:
+            await _jellyfin(request).navigate(press.key)
+            return {"ok": True, "target": "jellyfin"}
     await _ha(request).call("remote", "send_command",
                             entity_id=TV_REMOTE, command=press.key)
-    return {"ok": True}
+    return {"ok": True, "target": "tv"}
 
 
 class SourceChoice(BaseModel):
@@ -526,6 +566,20 @@ async def tv_mute(request: Request, user: User = Depends(api_user)):
     await _ha(request).call("media_player", "volume_mute",
                             entity_id=TV_MEDIA_PLAYER, is_volume_muted=not muted)
     return {"ok": True, "muted": not muted}
+
+
+class JellyfinPlayback(BaseModel):
+    action: PlaybackAction
+
+
+@app.post("/api/jellyfin/playback")
+async def jellyfin_playback(
+    request: Request,
+    choice: JellyfinPlayback,
+    user: User = Depends(api_user),
+):
+    await _jellyfin(request).playback(choice.action)
+    return {"ok": True, "action": choice.action}
 
 
 class SyncSwitch(BaseModel):

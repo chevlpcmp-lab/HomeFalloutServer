@@ -54,6 +54,13 @@ spec:
             - { name: HOUSE_DB, value: /data/house.db }
             # Hyperion lives on the Proxmox host, outside the cluster.
             - { name: HYPERION_URL, value: "http://10.0.0.254:8090/json-rpc" }
+            # Only this named Jellyfin Desktop session can receive the API key's
+            # whitelisted navigation and playback commands.
+            - { name: JELLYFIN_URL, value: "http://jellyfin.media.svc.cluster.local:8096" }
+            - { name: JELLYFIN_DEVICE_NAME, value: "home" }
+            - name: JELLYFIN_API_KEY
+              valueFrom:
+                secretKeyRef: { name: homarr-secrets, key: JELLYFIN_API_KEY }
           envFrom:
             # HA_URL, HA_TOKEN, SESSION_SECRET - see docs/secrets.md.
             - secretRef: { name: house-secrets }

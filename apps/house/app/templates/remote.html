@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 {% set tv = state.tv %}
+{% set jellyfin = state.jellyfin %}
 {% set usable = tv.reachable and tv.on %}
 
 <div class="devrow">
@@ -27,6 +28,33 @@
       <span class="t">TV</span><span class="s">Antenna</span>
     </button>
   </div>
+
+  <section class="nowplaying" id="jellyfin-card">
+    <div class="nowhead">
+      <span class="caplabel">Jellyfin</span>
+      <span class="jelly-status"><span class="dot{{ ' live' if jellyfin.connected }}" id="jellydot"></span>
+        <span id="jellystatus">{{ 'TV connected' if jellyfin.connected else ('Player offline' if jellyfin.reachable else 'Server unavailable') }}</span>
+      </span>
+    </div>
+    <div class="nowmeta">
+      <strong id="jellytitle">{{ jellyfin.title or 'Nothing playing' }}</strong>
+      <span id="jellysub">{{ jellyfin.subtitle or ('Paused' if jellyfin.state == 'paused' else 'Ready on the TV') }}</span>
+    </div>
+    <div class="playtime num">
+      <span id="jellyposition">0:00</span>
+      <div class="playtrack" aria-hidden="true"><span id="jellyprogress"></span></div>
+      <span id="jellyduration">0:00</span>
+    </div>
+    <div class="media-controls">
+      <button class="media-btn" data-jellyfin="previous" aria-label="Previous" {{ 'disabled' if not jellyfin.title }}>{{ icon("previous", 20) }}</button>
+      <button class="media-btn" data-jellyfin="seek_backward" aria-label="Back 10 seconds" {{ 'disabled' if not jellyfin.title }}>{{ icon("rewind", 21) }}<small>10</small></button>
+      <button class="media-btn primary" data-jellyfin="play_pause" aria-label="{{ 'Pause' if jellyfin.state == 'playing' else 'Play' }}" {{ 'disabled' if not jellyfin.title }}>
+        {{ icon("pause" if jellyfin.state == "playing" else "play", 23) }}
+      </button>
+      <button class="media-btn" data-jellyfin="seek_forward" aria-label="Forward 10 seconds" {{ 'disabled' if not jellyfin.title }}>{{ icon("forward", 21) }}<small>10</small></button>
+      <button class="media-btn" data-jellyfin="next" aria-label="Next" {{ 'disabled' if not jellyfin.title }}>{{ icon("next", 20) }}</button>
+    </div>
+  </section>
 
   <div class="padwrap">
     <button class="sat tl" data-key="KEY_HOME" aria-label="Home">{{ icon("home", 18) }}</button>

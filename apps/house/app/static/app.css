@@ -170,6 +170,83 @@ button:focus-visible, [tabindex]:focus-visible, a:focus-visible {
 .segbtn.on { background: var(--a-accent); border-color: var(--a-accent); color: var(--a-ink); }
 .segbtn.on .s { color: rgba(26, 11, 2, .7); }
 
+/* ---------------------------------------------------------------- now playing */
+
+.nowplaying {
+  background: var(--a-card);
+  border: 1px solid var(--a-line);
+  border-radius: 24px;
+  padding: 17px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.nowhead, .jelly-status, .playtime {
+  display: flex;
+  align-items: center;
+}
+.nowhead { justify-content: space-between; gap: 12px; }
+.jelly-status { gap: 7px; color: var(--a-muted); font-size: .72rem; }
+.nowmeta { display: flex; flex-direction: column; min-width: 0; }
+.nowmeta strong {
+  font-size: 1rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nowmeta span {
+  color: var(--a-muted);
+  font-size: .78rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.playtime { gap: 10px; color: var(--a-muted); font-size: .68rem; }
+.playtrack {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--a-card2);
+  flex: 1;
+  overflow: hidden;
+}
+.playtrack span {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--a-accent);
+}
+
+.media-controls {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 9px;
+}
+.media-btn {
+  justify-self: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  padding: 0;
+  border: 1px solid var(--a-line);
+  background: var(--a-card2);
+  color: var(--a-text);
+  display: grid;
+  place-items: center;
+  position: relative;
+  cursor: pointer;
+}
+.media-btn.primary { background: #fff; border-color: #fff; color: var(--a-accent); }
+.media-btn small {
+  position: absolute;
+  font-size: .48rem;
+  font-weight: 800;
+  line-height: 1;
+}
+.media-btn:disabled { opacity: .3; pointer-events: none; }
+
 /* ---------------------------------------------------------------- circular d-pad */
 
 .padwrap {

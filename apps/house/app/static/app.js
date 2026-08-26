@@ -65,6 +65,7 @@ function applyState(s) {
     return;
   }
   renderRemote(s);
+  renderJellyfin(s.jellyfin);
   renderLights(s);
   renderLightDetail(s);
 }
@@ -83,6 +84,7 @@ function scheduleRefresh(ms) {
 }
 
 if (PAGE === "remote" || PAGE === "lights") {
+  refresh();
   setInterval(() => { if (document.visibilityState === "visible") refresh(); }, 5000);
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") refresh();
@@ -113,6 +115,42 @@ function renderRemote(s) {
   $("#src-jellyfin").classList.toggle("on", usable && tv.source === "HDMI");
   $("#src-tv").classList.toggle("on", usable && tv.source === "TV");
   if (volTarget === null && !volDragging) renderVol(tv.volume);
+}
+
+function mediaTime(seconds) {
+  if (!Number.isFinite(seconds)) return "0:00";
+  const whole = Math.max(0, Math.round(seconds));
+  const hours = Math.floor(whole / 3600);
+  const minutes = Math.floor((whole % 3600) / 60);
+  const secs = String(whole % 60).padStart(2, "0");
+  return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${secs}` : `${minutes}:${secs}`;
+}
+
+function renderJellyfin(jellyfin) {
+  const card = $("#jellyfin-card");
+  if (!card || !jellyfin) return;
+  $("#jellydot").classList.toggle("live", jellyfin.connected);
+  $("#jellystatus").textContent = jellyfin.connected
+    ? "TV connected"
+    : (jellyfin.reachable ? "Player offline" : "Server unavailable");
+  $("#jellytitle").textContent = jellyfin.title || "Nothing playing";
+  $("#jellysub").textContent = jellyfin.subtitle || (
+    jellyfin.state === "paused" ? "Paused" : (jellyfin.connected ? "Ready on the TV" : "Open Jellyfin on the TV")
+  );
+
+  const position = Number.isFinite(jellyfin.position) ? jellyfin.position : 0;
+  const duration = Number.isFinite(jellyfin.duration) ? jellyfin.duration : 0;
+  $("#jellyposition").textContent = mediaTime(position);
+  $("#jellyduration").textContent = mediaTime(duration);
+  $("#jellyprogress").style.width = (duration ? clamp(position / duration * 100, 0, 100) : 0) + "%";
+
+  $$('[data-jellyfin]').forEach((btn) => { btn.disabled = !jellyfin.title; });
+  const toggle = $('[data-jellyfin="play_pause"]');
+  if (!toggle.dataset.busy) {
+    const playing = jellyfin.state === "playing";
+    setIcon(toggle, playing ? "pause" : "play");
+    toggle.setAttribute("aria-label", playing ? "Pause" : "Play");
+  }
 }
 
 function renderVol(level) {
@@ -231,6 +269,13 @@ $$("[data-source]").forEach((btn) =>
     act(btn, async () => {
       await api("/api/tv/source", { source: btn.dataset.source });
       $$(".segbtn").forEach((b) => b.classList.toggle("on", b === btn));
+    })));
+
+$$('[data-jellyfin]').forEach((btn) =>
+  btn.addEventListener("click", () =>
+    act(btn, async () => {
+      await api("/api/jellyfin/playback", { action: btn.dataset.jellyfin });
+      scheduleRefresh(350);
     })));
 
 /* ------------------------------------------------------------------ lights */
