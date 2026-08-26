@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Jellyfin · Overseer{% endblock %}
+{% block content %}
+{% set jellyfin = state.jellyfin %}
+
+<header class="jelly-page-head">
+  <div>
+    <span class="eyebrow">Living room</span>
+    <h1>Jellyfin</h1>
+  </div>
+  <span class="jelly-status"><span class="dot{{ ' live' if jellyfin.connected }}" id="jellydot"></span>
+    <span id="jellystatus">{{ 'TV connected' if jellyfin.connected else ('Player offline' if jellyfin.reachable else 'Server unavailable') }}</span>
+  </span>
+</header>
+
+<section class="nowplaying jelly-player" id="jellyfin-card">
+  <div class="nowhead">
+    <span class="caplabel">Now playing</span>
+    <span class="jelly-state" id="jelly-state-label">{{ jellyfin.state|capitalize }}</span>
+  </div>
+  <div class="jelly-now">
+    <img class="jelly-poster" id="jelly-poster" alt=""
+         {% if jellyfin.item_id %}src="/api/jellyfin/movies/{{ jellyfin.item_id }}/artwork"{% else %}hidden{% endif %}>
+    <div class="nowmeta">
+      <strong id="jellytitle">{{ jellyfin.title or 'Nothing playing' }}</strong>
+      <span id="jellysub">{{ jellyfin.subtitle or ('Paused' if jellyfin.state == 'paused' else ('Playing on the TV' if jellyfin.title else 'Choose a movie below')) }}</span>
+    </div>
+  </div>
+  <div class="playtime num">
+    <span id="jellyposition">0:00</span>
+    <div class="playtrack" aria-hidden="true"><span id="jellyprogress"></span></div>
+    <span id="jellyduration">0:00</span>
+  </div>
+  <div class="media-controls six">
+    <button class="media-btn" data-jellyfin="previous" aria-label="Previous" {{ 'disabled' if not jellyfin.title }}>{{ icon("previous", 20) }}</button>
+    <button class="media-btn" data-jellyfin="seek_backward" aria-label="Back 10 seconds" {{ 'disabled' if not jellyfin.title }}>{{ icon("rewind", 21) }}<small>10</small></button>
+    <button class="media-btn primary" data-jellyfin="play_pause" aria-label="{{ 'Pause' if jellyfin.state == 'playing' else 'Play' }}" {{ 'disabled' if not jellyfin.title }}>{{ icon("pause" if jellyfin.state == "playing" else "play", 23) }}</button>
+    <button class="media-btn" data-jellyfin="seek_forward" aria-label="Forward 10 seconds" {{ 'disabled' if not jellyfin.title }}>{{ icon("forward", 21) }}<small>10</small></button>
+    <button class="media-btn" data-jellyfin="next" aria-label="Next" {{ 'disabled' if not jellyfin.title }}>{{ icon("next", 20) }}</button>
+    <button class="media-btn stop" data-jellyfin="stop" aria-label="Stop" {{ 'disabled' if not jellyfin.title }}>{{ icon("stop", 19) }}</button>
+  </div>
+
+  <div class="stream-controls" id="stream-controls" {% if not jellyfin.title %}hidden{% endif %}>
+    <label>Audio
+      <select id="audio-select" {{ 'disabled' if not jellyfin.audio_streams }}>
+        {% for stream in jellyfin.audio_streams %}
+        <option value="{{ stream.index }}" {{ 'selected' if stream.index == jellyfin.audio_stream_index }}>{{ stream.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Subtitles
+      <select id="subtitle-select">
+        <option value="-1" {{ 'selected' if jellyfin.subtitle_stream_index == -1 }}>Off</option>
+        {% for stream in jellyfin.subtitle_streams %}
+        <option value="{{ stream.index }}" {{ 'selected' if stream.index == jellyfin.subtitle_stream_index }}>{{ stream.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </div>
+</section>
+
+<section class="moviefinder jelly-library">
+  <div class="nowhead">
+    <div>
+      <span class="caplabel">Movie library</span>
+      <h2 id="movie-results-title">Recently added</h2>
+    </div>
+    <span class="jelly-status">Play on TV</span>
+  </div>
+  <form class="movie-search" id="movie-search-form" role="search">
+    <input id="movie-query" type="search" minlength="2" maxlength="80"
+           autocomplete="off" enterkeyhint="search" placeholder="Search movies"
+           aria-label="Search the Jellyfin movie library">
+    <button type="submit" id="movie-search-button">Search</button>
+  </form>
+  <p class="movie-status" id="movie-search-status" aria-live="polite">Loading your movies…</p>
+  <div class="movie-results" id="movie-results"></div>
+</section>
+{% endblock %}

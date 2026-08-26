@@ -32,6 +32,7 @@ from .jellyfin import (
     JellyfinError,
     JellyfinItemUnavailable,
     JellyfinSessionUnavailable,
+    JellyfinStreamUnavailable,
     PlaybackAction,
     session_state as jellyfin_session_state,
 )
@@ -371,6 +372,12 @@ async def remote_page(request: Request, user: User = Depends(page_user)):
     return render(request, "remote.html", user, page="remote", state=state)
 
 
+@app.get("/jellyfin")
+async def jellyfin_page(request: Request, user: User = Depends(page_user)):
+    state = await gather_state(request, user)
+    return render(request, "jellyfin.html", user, page="jellyfin", state=state)
+
+
 @app.get("/lights")
 async def lights_page(request: Request, user: User = Depends(page_user)):
     state = await gather_state(request, user)
@@ -495,6 +502,11 @@ async def _jellyfin_item_error(request: Request, exc: JellyfinItemUnavailable):
     return JSONResponse({"detail": str(exc)}, status_code=404)
 
 
+@app.exception_handler(JellyfinStreamUnavailable)
+async def _jellyfin_stream_error(request: Request, exc: JellyfinStreamUnavailable):
+    return JSONResponse({"detail": str(exc)}, status_code=409)
+
+
 @app.exception_handler(JellyfinError)
 async def _jellyfin_error(request: Request, exc: JellyfinError):
     return JSONResponse({"detail": str(exc)}, status_code=502)
@@ -608,6 +620,11 @@ async def jellyfin_search(
     return {"movies": await _jellyfin(request).search_movies(query)}
 
 
+@app.get("/api/jellyfin/recent")
+async def jellyfin_recent(request: Request, user: User = Depends(api_user)):
+    return {"movies": await _jellyfin(request).recent_movies()}
+
+
 @app.get("/api/jellyfin/movies/{item_id}/artwork")
 async def jellyfin_artwork(
     request: Request,
@@ -628,18 +645,53 @@ async def jellyfin_play_movie(
     choice: MovieChoice,
     user: User = Depends(api_user),
 ):
-    row = await _ha(request).state(TV_MEDIA_PLAYER)
-    on = bool(row and row.get("state") in TV_ON_STATES)
-    source = ((row or {}).get("attributes") or {}).get("source")
-    if not on:
-        await _ha(request).call("media_player", "turn_on", entity_id=TV_MEDIA_PLAYER)
-    elif source != TV_SOURCES["jellyfin"]:
-        await _ha(request).call(
-            "media_player", "select_source",
-            entity_id=TV_MEDIA_PLAYER, source=TV_SOURCES["jellyfin"],
-        )
+    # Waking/routing the Samsung is helpful, but a temporary HA failure must not
+    # prevent the actual Jellyfin PlayNow command from reaching its TV client.
+    tv_ready = True
+    try:
+        row = await _ha(request).state(TV_MEDIA_PLAYER)
+        on = bool(row and row.get("state") in TV_ON_STATES)
+        source = ((row or {}).get("attributes") or {}).get("source")
+        if not on:
+            await _ha(request).call("media_player", "turn_on", entity_id=TV_MEDIA_PLAYER)
+            await asyncio.sleep(0.8)
+        if not on or source != TV_SOURCES["jellyfin"]:
+            await _ha(request).call(
+                "media_player", "select_source",
+                entity_id=TV_MEDIA_PLAYER, source=TV_SOURCES["jellyfin"],
+            )
+    except HAError:
+        tv_ready = False
     await _jellyfin(request).play_movie(choice.item_id)
-    return {"ok": True}
+    return {"ok": True, "tv_ready": tv_ready}
+
+
+class StreamChoice(BaseModel):
+    index: int
+
+
+@app.post("/api/jellyfin/audio")
+async def jellyfin_audio(
+    request: Request,
+    choice: StreamChoice,
+    user: User = Depends(api_user),
+):
+    if choice.index < 0:
+        raise HTTPException(400, "Choose an audio track")
+    await _jellyfin(request).set_stream("audio", choice.index)
+    return {"ok": True, "index": choice.index}
+
+
+@app.post("/api/jellyfin/subtitles")
+async def jellyfin_subtitles(
+    request: Request,
+    choice: StreamChoice,
+    user: User = Depends(api_user),
+):
+    if choice.index < -1:
+        raise HTTPException(400, "Choose a subtitle track or Off")
+    await _jellyfin(request).set_stream("subtitle", choice.index)
+    return {"ok": True, "index": choice.index}
 
 
 class SyncSwitch(BaseModel):
