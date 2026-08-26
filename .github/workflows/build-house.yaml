@@ -6,6 +6,7 @@ name: Build house image
 # it merges. Only main also moves :latest, and nothing deploys automatically:
 # the Deployment pins a sha, and a rollout is a deliberate one-line bump.
 on:
+  workflow_dispatch:
   push:
     paths:
       - "apps/house/**"
