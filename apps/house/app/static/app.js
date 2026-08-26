@@ -278,6 +278,92 @@ $$('[data-jellyfin]').forEach((btn) =>
       scheduleRefresh(350);
     })));
 
+function movieResult(movie) {
+  const row = document.createElement("article");
+  row.className = "movie-result";
+
+  let poster;
+  if (movie.has_image) {
+    poster = document.createElement("img");
+    poster.className = "movie-poster";
+    poster.alt = "";
+    poster.loading = "lazy";
+    poster.src = `/api/jellyfin/movies/${movie.id}/artwork`;
+    poster.addEventListener("error", () => {
+      const fallback = document.createElement("div");
+      fallback.className = "movie-poster";
+      fallback.textContent = "No art";
+      poster.replaceWith(fallback);
+    }, { once: true });
+  } else {
+    poster = document.createElement("div");
+    poster.className = "movie-poster";
+    poster.textContent = "No art";
+  }
+
+  const info = document.createElement("div");
+  info.className = "movie-info";
+  const title = document.createElement("span");
+  title.className = "movie-title";
+  title.textContent = movie.title;
+  const details = document.createElement("span");
+  details.className = "movie-year num";
+  details.textContent = [
+    movie.year,
+    movie.rating === null ? null : `${movie.rating} rating`,
+  ].filter(Boolean).join(" · ") || "Movie";
+  info.append(title, details);
+
+  const play = document.createElement("button");
+  play.type = "button";
+  play.className = "movie-play";
+  play.textContent = "Play";
+  play.setAttribute("aria-label", `Play ${movie.title} on the TV`);
+  play.addEventListener("click", () =>
+    act(play, async () => {
+      try {
+        await api("/api/jellyfin/play", { item_id: movie.id });
+        $("#movie-search-status").textContent = `Starting ${movie.title} on the TV…`;
+        scheduleRefresh(900);
+      } catch (error) {
+        $("#movie-search-status").textContent = "Couldn’t start that movie. Try again.";
+        throw error;
+      }
+    }));
+
+  row.append(poster, info, play);
+  return row;
+}
+
+const movieSearchForm = $("#movie-search-form");
+if (movieSearchForm) {
+  movieSearchForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const query = $("#movie-query").value.trim();
+    const button = $("#movie-search-button");
+    const status = $("#movie-search-status");
+    const results = $("#movie-results");
+    if (query.length < 2) {
+      status.textContent = "Enter at least two characters.";
+      return;
+    }
+    act(button, async () => {
+      status.textContent = "Searching…";
+      results.replaceChildren();
+      try {
+        const response = await api("/api/jellyfin/search", { query });
+        response.movies.forEach((movie) => results.append(movieResult(movie)));
+        status.textContent = response.movies.length
+          ? `${response.movies.length} ${response.movies.length === 1 ? "movie" : "movies"} found.`
+          : "No matching movies.";
+      } catch (error) {
+        status.textContent = "Search is unavailable right now. Try again.";
+        throw error;
+      }
+    });
+  });
+}
+
 /* ------------------------------------------------------------------ lights */
 
 function renderLights(s) {

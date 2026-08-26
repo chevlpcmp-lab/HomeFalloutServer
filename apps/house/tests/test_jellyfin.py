@@ -5,7 +5,16 @@ import unittest
 
 import httpx
 
-from app.jellyfin import Jellyfin, JellyfinSessionUnavailable, session_state
+from app.jellyfin import (
+    Jellyfin,
+    JellyfinItemUnavailable,
+    JellyfinSessionUnavailable,
+    session_state,
+)
+
+
+MOVIE_ID = "b936035f63983b5500b6a746a2885b51"
+SERIES_ID = "785c141f7ea8154f0c6bc09fd7fe3d39"
 
 
 TV_SESSION = {
@@ -61,6 +70,26 @@ class JellyfinClientTests(unittest.IsolatedAsyncioTestCase):
                     TV_SESSION,
                 ]
                 return httpx.Response(200, json=sessions)
+            if request.method == "GET" and request.url.path == "/Items":
+                return httpx.Response(200, json={"Items": [
+                    {
+                        "Id": MOVIE_ID,
+                        "Name": "The Example Movie",
+                        "Type": "Movie",
+                        "ProductionYear": 2026,
+                        "CommunityRating": 7.86,
+                        "ImageTags": {"Primary": "poster-tag"},
+                    },
+                    {"Id": SERIES_ID, "Name": "Not a movie", "Type": "Series"},
+                ]})
+            if request.method == "GET" and request.url.path == f"/Items/{MOVIE_ID}":
+                return httpx.Response(200, json={"Id": MOVIE_ID, "Type": "Movie"})
+            if request.method == "GET" and request.url.path == f"/Items/{SERIES_ID}":
+                return httpx.Response(200, json={"Id": SERIES_ID, "Type": "Series"})
+            if request.method == "GET" and request.url.path.endswith("/Images/Primary"):
+                return httpx.Response(
+                    200, content=b"poster", headers={"Content-Type": "image/webp"}
+                )
             return httpx.Response(204)
 
         self.client = Jellyfin(
@@ -97,6 +126,36 @@ class JellyfinClientTests(unittest.IsolatedAsyncioTestCase):
         state = await self.client.state()
         self.assertNotIn("secret", json.dumps(state))
         self.assertNotIn("session", json.dumps(state))
+
+    async def test_search_returns_only_safe_movie_fields(self) -> None:
+        movies = await self.client.search_movies("example")
+        self.assertEqual(movies, [{
+            "id": MOVIE_ID,
+            "title": "The Example Movie",
+            "year": 2026,
+            "rating": 7.9,
+            "has_image": True,
+        }])
+        self.assertEqual(self.requests[-1].url.params["includeItemTypes"], "Movie")
+        self.assertEqual(self.requests[-1].url.params["recursive"], "true")
+
+    async def test_artwork_keeps_bytes_and_media_type_server_side(self) -> None:
+        content, media_type = await self.client.artwork(MOVIE_ID)
+        self.assertEqual(content, b"poster")
+        self.assertEqual(media_type, "image/webp")
+
+    async def test_play_movie_validates_then_targets_tv_session(self) -> None:
+        await self.client.play_movie(MOVIE_ID)
+        request = self.requests[-1]
+        self.assertEqual(request.url.path, "/Sessions/tv-session/Playing")
+        self.assertEqual(request.url.params["playCommand"], "PlayNow")
+        self.assertEqual(request.url.params["itemIds"], MOVIE_ID)
+        self.assertEqual(request.url.params["startPositionTicks"], "0")
+
+    async def test_play_refuses_non_movie_items(self) -> None:
+        with self.assertRaises(JellyfinItemUnavailable):
+            await self.client.play_movie(SERIES_ID)
+        self.assertFalse(any(r.url.path.endswith("/Playing") for r in self.requests))
 
     async def test_missing_tv_refuses_commands(self) -> None:
         client = Jellyfin(

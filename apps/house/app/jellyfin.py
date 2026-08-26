@@ -20,6 +20,10 @@ class JellyfinSessionUnavailable(JellyfinError):
     """The configured TV client is not connected to Jellyfin."""
 
 
+class JellyfinItemUnavailable(JellyfinError):
+    """The requested item is missing or is not a movie."""
+
+
 PlaybackAction = Literal[
     "play_pause", "stop", "previous", "next", "seek_backward", "seek_forward"
 ]
@@ -109,16 +113,56 @@ class Jellyfin:
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+    async def _response(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         try:
             response = await self._client.request(method, path, **kwargs)
         except httpx.HTTPError as exc:
             raise JellyfinError(f"Jellyfin unreachable: {exc.__class__.__name__}") from exc
         if response.status_code >= 400:
             raise JellyfinError(f"Jellyfin answered {response.status_code} for {path}")
+        return response
+
+    async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+        response = await self._response(method, path, **kwargs)
         if not response.content:
             return None
         return response.json()
+
+    async def search_movies(self, query: str, limit: int = 12) -> list[dict]:
+        data = await self._request(
+            "GET",
+            "/Items",
+            params={
+                "searchTerm": query,
+                "includeItemTypes": "Movie",
+                "recursive": "true",
+                "limit": limit,
+                "fields": "PrimaryImageAspectRatio",
+                "sortBy": "SortName",
+                "sortOrder": "Ascending",
+            },
+        )
+        results = []
+        for item in data.get("Items", []):
+            if item.get("Type") != "Movie":
+                continue
+            rating = item.get("CommunityRating")
+            results.append({
+                "id": item["Id"],
+                "title": item.get("Name") or "Untitled",
+                "year": item.get("ProductionYear"),
+                "rating": round(rating, 1) if isinstance(rating, (int, float)) else None,
+                "has_image": bool((item.get("ImageTags") or {}).get("Primary")),
+            })
+        return results
+
+    async def artwork(self, item_id: str) -> tuple[bytes, str]:
+        response = await self._response(
+            "GET",
+            f"/Items/{item_id}/Images/Primary",
+            params={"maxWidth": 240, "quality": 85},
+        )
+        return response.content, response.headers.get("content-type", "image/jpeg")
 
     async def _tv_session(self) -> dict | None:
         sessions = await self._request("GET", "/Sessions")
@@ -178,4 +222,19 @@ class Jellyfin:
         await self._request(
             "POST",
             f"/Sessions/{session['Id']}/Playing/{PLAYBACK_COMMANDS[action]}",
+        )
+
+    async def play_movie(self, item_id: str) -> None:
+        item = await self._request("GET", f"/Items/{item_id}")
+        if not item or item.get("Type") != "Movie":
+            raise JellyfinItemUnavailable("That movie is no longer available")
+        session = await self._required_session()
+        await self._request(
+            "POST",
+            f"/Sessions/{session['Id']}/Playing",
+            params={
+                "playCommand": "PlayNow",
+                "itemIds": item_id,
+                "startPositionTicks": 0,
+            },
         )
