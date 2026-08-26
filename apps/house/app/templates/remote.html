@@ -56,6 +56,21 @@
     </div>
   </section>
 
+  <section class="moviefinder">
+    <div class="nowhead">
+      <span class="caplabel">Find a movie</span>
+      <span class="jelly-status">Play it on the TV</span>
+    </div>
+    <form class="movie-search" id="movie-search-form" role="search">
+      <input id="movie-query" type="search" minlength="2" maxlength="80"
+             autocomplete="off" enterkeyhint="search" placeholder="Movie title"
+             aria-label="Search the Jellyfin movie library">
+      <button type="submit" id="movie-search-button">Search</button>
+    </form>
+    <p class="movie-status" id="movie-search-status" aria-live="polite">Search your Jellyfin library.</p>
+    <div class="movie-results" id="movie-results"></div>
+  </section>
+
   <div class="padwrap">
     <button class="sat tl" data-key="KEY_HOME" aria-label="Home">{{ icon("home", 18) }}</button>
     <button class="sat tr" data-key="KEY_SOURCE" aria-label="Source">{{ icon("src", 18) }}</button>

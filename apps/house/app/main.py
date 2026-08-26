@@ -15,9 +15,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
-from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Path as ApiPath, Request
 from markupsafe import Markup
-from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
@@ -30,6 +30,7 @@ from .jellyfin import (
     NAVIGATION_COMMANDS,
     Jellyfin,
     JellyfinError,
+    JellyfinItemUnavailable,
     JellyfinSessionUnavailable,
     PlaybackAction,
     session_state as jellyfin_session_state,
@@ -489,6 +490,11 @@ async def _jellyfin_session_error(request: Request, exc: JellyfinSessionUnavaila
     return JSONResponse({"detail": str(exc)}, status_code=409)
 
 
+@app.exception_handler(JellyfinItemUnavailable)
+async def _jellyfin_item_error(request: Request, exc: JellyfinItemUnavailable):
+    return JSONResponse({"detail": str(exc)}, status_code=404)
+
+
 @app.exception_handler(JellyfinError)
 async def _jellyfin_error(request: Request, exc: JellyfinError):
     return JSONResponse({"detail": str(exc)}, status_code=502)
@@ -580,6 +586,60 @@ async def jellyfin_playback(
 ):
     await _jellyfin(request).playback(choice.action)
     return {"ok": True, "action": choice.action}
+
+
+class MovieSearch(BaseModel):
+    query: str = Field(min_length=2, max_length=80)
+
+
+class MovieChoice(BaseModel):
+    item_id: str = Field(pattern=r"^[0-9A-Fa-f]{32}$")
+
+
+@app.post("/api/jellyfin/search")
+async def jellyfin_search(
+    request: Request,
+    search: MovieSearch,
+    user: User = Depends(api_user),
+):
+    query = search.query.strip()
+    if len(query) < 2:
+        raise HTTPException(400, "Enter at least two characters")
+    return {"movies": await _jellyfin(request).search_movies(query)}
+
+
+@app.get("/api/jellyfin/movies/{item_id}/artwork")
+async def jellyfin_artwork(
+    request: Request,
+    item_id: str = ApiPath(pattern=r"^[0-9A-Fa-f]{32}$"),
+    user: User = Depends(api_user),
+):
+    content, media_type = await _jellyfin(request).artwork(item_id)
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Cache-Control": "private, max-age=86400"},
+    )
+
+
+@app.post("/api/jellyfin/play")
+async def jellyfin_play_movie(
+    request: Request,
+    choice: MovieChoice,
+    user: User = Depends(api_user),
+):
+    row = await _ha(request).state(TV_MEDIA_PLAYER)
+    on = bool(row and row.get("state") in TV_ON_STATES)
+    source = ((row or {}).get("attributes") or {}).get("source")
+    if not on:
+        await _ha(request).call("media_player", "turn_on", entity_id=TV_MEDIA_PLAYER)
+    elif source != TV_SOURCES["jellyfin"]:
+        await _ha(request).call(
+            "media_player", "select_source",
+            entity_id=TV_MEDIA_PLAYER, source=TV_SOURCES["jellyfin"],
+        )
+    await _jellyfin(request).play_movie(choice.item_id)
+    return {"ok": True}
 
 
 class SyncSwitch(BaseModel):
