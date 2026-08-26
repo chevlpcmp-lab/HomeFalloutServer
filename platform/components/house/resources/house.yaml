@@ -48,7 +48,7 @@ spec:
         fsGroup: 10001
       containers:
         - name: house
-          image: ghcr.io/chevlpcmp-lab/house:13163cb3e154478bb66529b285e64720235b5152
+          image: ghcr.io/chevlpcmp-lab/house:f243a00d229a6769526b509a14aa10bbbf42a3b5
           env:
             - { name: TZ, value: America/Toronto }
             - { name: HOUSE_DB, value: /data/house.db }
