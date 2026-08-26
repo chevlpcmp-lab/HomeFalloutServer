@@ -10,10 +10,16 @@ from __future__ import annotations
 
 import os
 
-# Home Assistant, the app's only integration point. The Service resolves to the
-# hostNetwork pod on the apps node, so this works from inside the cluster.
+# Home Assistant. The Service resolves to the hostNetwork pod on the apps node,
+# so this works from inside the cluster.
 HA_URL = os.environ.get("HA_URL", "http://home-assistant.media.svc.cluster.local:8123")
 HA_TOKEN = os.environ.get("HA_TOKEN", "")
+
+# Jellyfin remote control. The API key is kept server-side and the client module
+# restricts it to the configured TV device and an explicit command allow-list.
+JELLYFIN_URL = os.environ.get("JELLYFIN_URL", "http://jellyfin.media.svc.cluster.local:8096")
+JELLYFIN_API_KEY = os.environ.get("JELLYFIN_API_KEY", "")
+JELLYFIN_DEVICE_NAME = os.environ.get("JELLYFIN_DEVICE_NAME", "home")
 
 # Hyperion runs on the Proxmox host, not in the cluster, and takes this one
 # unauthenticated JSON-RPC call. See docs/ambient-lighting.md.
@@ -36,4 +42,13 @@ def require_ha_token() -> None:
         raise RuntimeError(
             "HA_TOKEN is not set. In the cluster it comes from the house-secrets "
             "Secret; locally, export a Home Assistant long-lived access token."
+        )
+
+
+def require_jellyfin_key() -> None:
+    """Refuse to present a half-configured Jellyfin remote."""
+    if not JELLYFIN_API_KEY:
+        raise RuntimeError(
+            "JELLYFIN_API_KEY is not set. In the cluster it comes from the "
+            "homarr-secrets Secret."
         )
