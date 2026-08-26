@@ -190,11 +190,18 @@ class JellyfinClientTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(validation.url.params["fields"], "MediaStreams")
         self.assertFalse(any(request.url.path == f"/Items/{MOVIE_ID}" for request in self.requests))
-        request = self.requests[-1]
+        request = next(
+            request for request in self.requests
+            if request.url.path == "/Sessions/tv-session/Playing"
+        )
         self.assertEqual(request.url.path, "/Sessions/tv-session/Playing")
         self.assertEqual(request.url.params["playCommand"], "PlayNow")
         self.assertEqual(request.url.params["itemIds"], MOVIE_ID)
         self.assertEqual(request.url.params["startPositionTicks"], "0")
+        self.assertEqual(
+            self.requests[-1].url.path,
+            "/Sessions/tv-session/Playing/Unpause",
+        )
 
     async def test_play_refuses_non_movie_items(self) -> None:
         with self.assertRaises(JellyfinItemUnavailable):
