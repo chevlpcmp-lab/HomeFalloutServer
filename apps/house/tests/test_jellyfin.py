@@ -9,6 +9,7 @@ from app.jellyfin import (
     Jellyfin,
     JellyfinItemUnavailable,
     JellyfinSessionUnavailable,
+    JellyfinStreamUnavailable,
     session_state,
 )
 
@@ -24,13 +25,24 @@ TV_SESSION = {
     "SupportsRemoteControl": True,
     "LastActivityDate": "2026-08-25T16:00:00Z",
     "NowPlayingItem": {
+        "Id": MOVIE_ID,
         "Name": "The Example",
         "SeriesName": "Examples",
         "ParentIndexNumber": 2,
         "IndexNumber": 4,
         "RunTimeTicks": 2_700_000_000,
+        "MediaStreams": [
+            {"Type": "Audio", "Index": 1, "DisplayTitle": "English · AAC · Stereo"},
+            {"Type": "Audio", "Index": 2, "Language": "fra", "Codec": "aac"},
+            {"Type": "Subtitle", "Index": 3, "DisplayTitle": "English · SUBRIP"},
+        ],
     },
-    "PlayState": {"PositionTicks": 1_230_000_000, "IsPaused": True},
+    "PlayState": {
+        "PositionTicks": 1_230_000_000,
+        "IsPaused": True,
+        "AudioStreamIndex": 1,
+        "SubtitleStreamIndex": -1,
+    },
 }
 
 
@@ -46,6 +58,16 @@ class JellyfinStateTests(unittest.TestCase):
                 "subtitle": "Examples · S2E4",
                 "position": 123,
                 "duration": 270,
+                "item_id": MOVIE_ID,
+                "audio_streams": [
+                    {"index": 1, "label": "English · AAC · Stereo"},
+                    {"index": 2, "label": "FRA · AAC"},
+                ],
+                "subtitle_streams": [
+                    {"index": 3, "label": "English · SUBRIP"},
+                ],
+                "audio_stream_index": 1,
+                "subtitle_stream_index": -1,
             },
         )
 
@@ -71,6 +93,20 @@ class JellyfinClientTests(unittest.IsolatedAsyncioTestCase):
                 ]
                 return httpx.Response(200, json=sessions)
             if request.method == "GET" and request.url.path == "/Items":
+                requested_id = request.url.params.get("ids")
+                if requested_id == MOVIE_ID:
+                    return httpx.Response(200, json={"Items": [
+                        {
+                            "Id": MOVIE_ID,
+                            "Name": "The Example Movie",
+                            "Type": "Movie",
+                            "MediaStreams": TV_SESSION["NowPlayingItem"]["MediaStreams"],
+                        }
+                    ]})
+                if requested_id == SERIES_ID:
+                    return httpx.Response(200, json={"Items": [
+                        {"Id": SERIES_ID, "Name": "Not a movie", "Type": "Series"}
+                    ]})
                 return httpx.Response(200, json={"Items": [
                     {
                         "Id": MOVIE_ID,
@@ -82,10 +118,6 @@ class JellyfinClientTests(unittest.IsolatedAsyncioTestCase):
                     },
                     {"Id": SERIES_ID, "Name": "Not a movie", "Type": "Series"},
                 ]})
-            if request.method == "GET" and request.url.path == f"/Items/{MOVIE_ID}":
-                return httpx.Response(200, json={"Id": MOVIE_ID, "Type": "Movie"})
-            if request.method == "GET" and request.url.path == f"/Items/{SERIES_ID}":
-                return httpx.Response(200, json={"Id": SERIES_ID, "Type": "Series"})
             if request.method == "GET" and request.url.path.endswith("/Images/Primary"):
                 return httpx.Response(
                     200, content=b"poster", headers={"Content-Type": "image/webp"}
@@ -139,6 +171,12 @@ class JellyfinClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.requests[-1].url.params["includeItemTypes"], "Movie")
         self.assertEqual(self.requests[-1].url.params["recursive"], "true")
 
+    async def test_recent_movies_uses_library_creation_order(self) -> None:
+        movies = await self.client.recent_movies()
+        self.assertEqual(movies[0]["title"], "The Example Movie")
+        self.assertEqual(self.requests[-1].url.params["sortBy"], "DateCreated")
+        self.assertEqual(self.requests[-1].url.params["sortOrder"], "Descending")
+
     async def test_artwork_keeps_bytes_and_media_type_server_side(self) -> None:
         content, media_type = await self.client.artwork(MOVIE_ID)
         self.assertEqual(content, b"poster")
@@ -146,6 +184,12 @@ class JellyfinClientTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_play_movie_validates_then_targets_tv_session(self) -> None:
         await self.client.play_movie(MOVIE_ID)
+        validation = next(
+            request for request in self.requests
+            if request.url.path == "/Items" and request.url.params.get("ids") == MOVIE_ID
+        )
+        self.assertEqual(validation.url.params["fields"], "MediaStreams")
+        self.assertFalse(any(request.url.path == f"/Items/{MOVIE_ID}" for request in self.requests))
         request = self.requests[-1]
         self.assertEqual(request.url.path, "/Sessions/tv-session/Playing")
         self.assertEqual(request.url.params["playCommand"], "PlayNow")
@@ -156,6 +200,27 @@ class JellyfinClientTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(JellyfinItemUnavailable):
             await self.client.play_movie(SERIES_ID)
         self.assertFalse(any(r.url.path.endswith("/Playing") for r in self.requests))
+
+    async def test_audio_stream_command_is_validated_and_sent(self) -> None:
+        await self.client.set_stream("audio", 2)
+        request = self.requests[-1]
+        self.assertEqual(request.url.path, "/Sessions/tv-session/Command")
+        self.assertEqual(json.loads(request.content), {
+            "Name": "SetAudioStreamIndex",
+            "Arguments": {"Index": "2"},
+        })
+
+    async def test_subtitles_can_be_disabled(self) -> None:
+        await self.client.set_stream("subtitle", -1)
+        self.assertEqual(json.loads(self.requests[-1].content), {
+            "Name": "SetSubtitleStreamIndex",
+            "Arguments": {"Index": "-1"},
+        })
+
+    async def test_stream_command_refuses_unknown_index(self) -> None:
+        with self.assertRaises(JellyfinStreamUnavailable):
+            await self.client.set_stream("subtitle", 99)
+        self.assertFalse(any(r.url.path.endswith("/Command") for r in self.requests))
 
     async def test_missing_tv_refuses_commands(self) -> None:
         client = Jellyfin(

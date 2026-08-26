@@ -24,6 +24,10 @@ class JellyfinItemUnavailable(JellyfinError):
     """The requested item is missing or is not a movie."""
 
 
+class JellyfinStreamUnavailable(JellyfinError):
+    """The requested audio or subtitle stream is not available."""
+
+
 PlaybackAction = Literal[
     "play_pause", "stop", "previous", "next", "seek_backward", "seek_forward"
 ]
@@ -53,6 +57,22 @@ def _ticks_to_seconds(value: Any) -> int | None:
     return max(0, round(value / 10_000_000))
 
 
+def _stream_label(stream: dict) -> str:
+    label = stream.get("DisplayTitle") or stream.get("Title")
+    if label:
+        return str(label)
+    parts = [stream.get("Language"), stream.get("Codec")]
+    return " · ".join(str(part).upper() for part in parts if part) or "Unknown track"
+
+
+def _stream_choices(item: dict, stream_type: str) -> list[dict]:
+    return [
+        {"index": stream["Index"], "label": _stream_label(stream)}
+        for stream in item.get("MediaStreams") or []
+        if stream.get("Type") == stream_type and isinstance(stream.get("Index"), int)
+    ]
+
+
 def session_state(session: dict | None, reachable: bool = True) -> dict:
     """Return the small, stable shape exposed by Overseer's state endpoint."""
     if session is None:
@@ -64,6 +84,11 @@ def session_state(session: dict | None, reachable: bool = True) -> dict:
             "subtitle": None,
             "position": None,
             "duration": None,
+            "item_id": None,
+            "audio_streams": [],
+            "subtitle_streams": [],
+            "audio_stream_index": None,
+            "subtitle_stream_index": -1,
         }
 
     item = session.get("NowPlayingItem") or {}
@@ -90,6 +115,11 @@ def session_state(session: dict | None, reachable: bool = True) -> dict:
         "subtitle": subtitle,
         "position": _ticks_to_seconds(play_state.get("PositionTicks")),
         "duration": _ticks_to_seconds(item.get("RunTimeTicks")),
+        "item_id": item.get("Id"),
+        "audio_streams": _stream_choices(item, "Audio"),
+        "subtitle_streams": _stream_choices(item, "Subtitle"),
+        "audio_stream_index": play_state.get("AudioStreamIndex"),
+        "subtitle_stream_index": play_state.get("SubtitleStreamIndex", -1),
     }
 
 
@@ -128,23 +158,11 @@ class Jellyfin:
             return None
         return response.json()
 
-    async def search_movies(self, query: str, limit: int = 12) -> list[dict]:
-        data = await self._request(
-            "GET",
-            "/Items",
-            params={
-                "searchTerm": query,
-                "includeItemTypes": "Movie",
-                "recursive": "true",
-                "limit": limit,
-                "fields": "PrimaryImageAspectRatio",
-                "sortBy": "SortName",
-                "sortOrder": "Ascending",
-            },
-        )
+    @staticmethod
+    def _safe_movies(data: dict) -> list[dict]:
         results = []
         for item in data.get("Items", []):
-            if item.get("Type") != "Movie":
+            if item.get("Type") != "Movie" or not item.get("Id"):
                 continue
             rating = item.get("CommunityRating")
             results.append({
@@ -155,6 +173,41 @@ class Jellyfin:
                 "has_image": bool((item.get("ImageTags") or {}).get("Primary")),
             })
         return results
+
+    async def _items(self, **params: Any) -> dict:
+        return await self._request("GET", "/Items", params=params)
+
+    async def _item(self, item_id: str) -> dict | None:
+        data = await self._items(
+            ids=item_id,
+            recursive="true",
+            limit=1,
+            fields="MediaStreams",
+        )
+        return next(iter(data.get("Items") or []), None)
+
+    async def search_movies(self, query: str, limit: int = 12) -> list[dict]:
+        data = await self._items(
+            searchTerm=query,
+            includeItemTypes="Movie",
+            recursive="true",
+            limit=limit,
+            fields="PrimaryImageAspectRatio",
+            sortBy="SortName",
+            sortOrder="Ascending",
+        )
+        return self._safe_movies(data)
+
+    async def recent_movies(self, limit: int = 12) -> list[dict]:
+        data = await self._items(
+            includeItemTypes="Movie",
+            recursive="true",
+            limit=limit,
+            fields="PrimaryImageAspectRatio",
+            sortBy="DateCreated",
+            sortOrder="Descending",
+        )
+        return self._safe_movies(data)
 
     async def artwork(self, item_id: str) -> tuple[bytes, str]:
         response = await self._response(
@@ -185,7 +238,13 @@ class Jellyfin:
         )
 
     async def state(self) -> dict:
-        return session_state(await self._tv_session())
+        session = await self._tv_session()
+        item = (session or {}).get("NowPlayingItem") or {}
+        if session and item.get("Id") and not item.get("MediaStreams"):
+            full_item = await self._item(item["Id"])
+            if full_item:
+                session = {**session, "NowPlayingItem": {**item, **full_item}}
+        return session_state(session)
 
     async def _required_session(self) -> dict:
         session = await self._tv_session()
@@ -225,7 +284,9 @@ class Jellyfin:
         )
 
     async def play_movie(self, item_id: str) -> None:
-        item = await self._request("GET", f"/Items/{item_id}")
+        # Jellyfin 10.11's /Items/{id} route requires a user id even for an API
+        # key. The collection route accepts an id filter and is API-key safe.
+        item = await self._item(item_id)
         if not item or item.get("Type") != "Movie":
             raise JellyfinItemUnavailable("That movie is no longer available")
         session = await self._required_session()
@@ -237,4 +298,29 @@ class Jellyfin:
                 "itemIds": item_id,
                 "startPositionTicks": 0,
             },
+        )
+
+    async def set_stream(self, stream_type: Literal["audio", "subtitle"], index: int) -> None:
+        session = await self._required_session()
+        item = session.get("NowPlayingItem") or {}
+        if not item.get("Id"):
+            raise JellyfinStreamUnavailable("Nothing is playing on the TV")
+        if not item.get("MediaStreams"):
+            item = await self._item(item["Id"]) or item
+
+        jellyfin_type = "Audio" if stream_type == "audio" else "Subtitle"
+        valid_indexes = {choice["index"] for choice in _stream_choices(item, jellyfin_type)}
+        if stream_type == "subtitle" and index == -1:
+            pass
+        elif index not in valid_indexes:
+            raise JellyfinStreamUnavailable(f"That {stream_type} track is unavailable")
+
+        command = (
+            "SetAudioStreamIndex" if stream_type == "audio"
+            else "SetSubtitleStreamIndex"
+        )
+        await self._request(
+            "POST",
+            f"/Sessions/{session['Id']}/Command",
+            json={"Name": command, "Arguments": {"Index": str(index)}},
         )

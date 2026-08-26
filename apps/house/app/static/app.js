@@ -15,7 +15,11 @@ async function api(path, body) {
     body: JSON.stringify(body ?? {}),
   });
   if (res.status === 401) { location.href = "/login"; throw new Error("signed out"); }
-  if (!res.ok) throw new Error(String(res.status));
+  if (!res.ok) {
+    let message = String(res.status);
+    try { message = (await res.json()).detail || message; } catch { /* keep status */ }
+    throw new Error(message);
+  }
   return res.json();
 }
 
@@ -83,7 +87,7 @@ function scheduleRefresh(ms) {
   refreshTimer = setTimeout(refresh, ms);
 }
 
-if (PAGE === "remote" || PAGE === "lights") {
+if (PAGE === "remote" || PAGE === "jellyfin" || PAGE === "lights") {
   refresh();
   setInterval(() => { if (document.visibilityState === "visible") refresh(); }, 5000);
   document.addEventListener("visibilitychange", () => {
@@ -135,8 +139,27 @@ function renderJellyfin(jellyfin) {
     : (jellyfin.reachable ? "Player offline" : "Server unavailable");
   $("#jellytitle").textContent = jellyfin.title || "Nothing playing";
   $("#jellysub").textContent = jellyfin.subtitle || (
-    jellyfin.state === "paused" ? "Paused" : (jellyfin.connected ? "Ready on the TV" : "Open Jellyfin on the TV")
+    jellyfin.state === "paused" ? "Paused" : (
+      jellyfin.title ? "Playing on the TV" : (jellyfin.connected ? "Choose a movie below" : "Open Jellyfin on the TV")
+    )
   );
+  const stateLabel = $("#jelly-state-label");
+  if (stateLabel) stateLabel.textContent = jellyfin.state;
+
+  const poster = $("#jelly-poster");
+  if (poster) {
+    if (jellyfin.item_id) {
+      if (poster.dataset.itemId !== jellyfin.item_id) {
+        poster.dataset.itemId = jellyfin.item_id;
+        poster.src = `/api/jellyfin/movies/${jellyfin.item_id}/artwork`;
+      }
+      poster.hidden = false;
+    } else {
+      poster.hidden = true;
+      poster.removeAttribute("src");
+      delete poster.dataset.itemId;
+    }
+  }
 
   const position = Number.isFinite(jellyfin.position) ? jellyfin.position : 0;
   const duration = Number.isFinite(jellyfin.duration) ? jellyfin.duration : 0;
@@ -151,6 +174,26 @@ function renderJellyfin(jellyfin) {
     setIcon(toggle, playing ? "pause" : "play");
     toggle.setAttribute("aria-label", playing ? "Pause" : "Play");
   }
+
+  const streams = $("#stream-controls");
+  if (streams) streams.hidden = !jellyfin.title;
+  renderStreamSelect($("#audio-select"), jellyfin.audio_streams || [], jellyfin.audio_stream_index);
+  renderStreamSelect($("#subtitle-select"), jellyfin.subtitle_streams || [], jellyfin.subtitle_stream_index, true);
+}
+
+function renderStreamSelect(select, choices, selected, allowOff = false) {
+  if (!select || select.dataset.busy) return;
+  const signature = JSON.stringify(choices);
+  if (select.dataset.choices !== signature) {
+    const options = [];
+    if (allowOff) options.push(new Option("Off", "-1"));
+    choices.forEach((choice) => options.push(new Option(choice.label, String(choice.index))));
+    select.replaceChildren(...options);
+    select.dataset.choices = signature;
+  }
+  const wanted = String(selected ?? (allowOff ? -1 : ""));
+  if ([...select.options].some((option) => option.value === wanted)) select.value = wanted;
+  select.disabled = !allowOff && choices.length === 0;
 }
 
 function renderVol(level) {
@@ -322,11 +365,13 @@ function movieResult(movie) {
   play.addEventListener("click", () =>
     act(play, async () => {
       try {
-        await api("/api/jellyfin/play", { item_id: movie.id });
-        $("#movie-search-status").textContent = `Starting ${movie.title} on the TV…`;
+        const response = await api("/api/jellyfin/play", { item_id: movie.id });
+        $("#movie-search-status").textContent = response.tv_ready
+          ? `Starting ${movie.title} on the TV…`
+          : `${movie.title} is starting; switch the TV to Jellyfin if needed.`;
         scheduleRefresh(900);
       } catch (error) {
-        $("#movie-search-status").textContent = "Couldn’t start that movie. Try again.";
+        $("#movie-search-status").textContent = `Couldn’t start that movie: ${error.message}`;
         throw error;
       }
     }));
@@ -343,6 +388,7 @@ if (movieSearchForm) {
     const button = $("#movie-search-button");
     const status = $("#movie-search-status");
     const results = $("#movie-results");
+    const heading = $("#movie-results-title");
     if (query.length < 2) {
       status.textContent = "Enter at least two characters.";
       return;
@@ -353,6 +399,7 @@ if (movieSearchForm) {
       try {
         const response = await api("/api/jellyfin/search", { query });
         response.movies.forEach((movie) => results.append(movieResult(movie)));
+        if (heading) heading.textContent = `Results for “${query}”`;
         status.textContent = response.movies.length
           ? `${response.movies.length} ${response.movies.length === 1 ? "movie" : "movies"} found.`
           : "No matching movies.";
@@ -362,7 +409,47 @@ if (movieSearchForm) {
       }
     });
   });
+
+  const loadRecent = async () => {
+    const status = $("#movie-search-status");
+    const results = $("#movie-results");
+    const heading = $("#movie-results-title");
+    try {
+      const res = await fetch("/api/jellyfin/recent", { cache: "no-store" });
+      if (res.status === 401) { location.href = "/login"; return; }
+      if (!res.ok) throw new Error(String(res.status));
+      const response = await res.json();
+      results.replaceChildren(...response.movies.map(movieResult));
+      if (heading) heading.textContent = "Recently added";
+      status.textContent = response.movies.length
+        ? `${response.movies.length} movies ready to play.`
+        : "No movies in the library yet.";
+    } catch {
+      status.textContent = "Your movie library is unavailable right now.";
+    }
+  };
+  loadRecent();
+  $("#movie-query").addEventListener("search", (event) => {
+    if (!event.target.value) loadRecent();
+  });
 }
+
+const jellyPoster = $("#jelly-poster");
+if (jellyPoster) jellyPoster.addEventListener("error", () => { jellyPoster.hidden = true; });
+
+const audioSelect = $("#audio-select");
+if (audioSelect) audioSelect.addEventListener("change", () =>
+  act(audioSelect, async () => {
+    await api("/api/jellyfin/audio", { index: Number(audioSelect.value) });
+    scheduleRefresh(500);
+  }));
+
+const subtitleSelect = $("#subtitle-select");
+if (subtitleSelect) subtitleSelect.addEventListener("change", () =>
+  act(subtitleSelect, async () => {
+    await api("/api/jellyfin/subtitles", { index: Number(subtitleSelect.value) });
+    scheduleRefresh(500);
+  }));
 
 /* ------------------------------------------------------------------ lights */
 
