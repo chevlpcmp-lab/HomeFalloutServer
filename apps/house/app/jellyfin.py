@@ -7,6 +7,7 @@ commands.  Browser requests never receive the key or a Jellyfin session id.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Literal
 
 import httpx
@@ -298,6 +299,12 @@ class Jellyfin:
                 "itemIds": item_id,
                 "startPositionTicks": 0,
             },
+        )
+        # Jellyfin Desktop can preserve the previous paused state when PlayNow
+        # replaces its queue. Give it a beat to load, then make Play explicit.
+        await asyncio.sleep(0.4)
+        await self._request(
+            "POST", f"/Sessions/{session['Id']}/Playing/Unpause"
         )
 
     async def set_stream(self, stream_type: Literal["audio", "subtitle"], index: int) -> None:
