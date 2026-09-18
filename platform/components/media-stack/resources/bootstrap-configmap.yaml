@@ -306,7 +306,30 @@ data:
             "save_path": "/data/downloads/complete",
             "temp_path_enabled": True,
             "temp_path": "/data/downloads/incomplete",
+            # No download ceiling. The GIGA uplink is 50 Mbit/s, so hold torrent
+            # payload to ~40 Mbit/s and leave headroom for ACKs, DNS, and WebUIs.
+            "dl_limit": 0,
+            "up_limit": 4_883,
+            # Enough peer concurrency to fill a fast line without thrashing the
+            # two-CPU qBittorrent container or Gluetun's connection tracking.
+            "max_connec": 500,
+            "max_connec_per_torrent": 150,
+            "max_uploads": 40,
+            "max_uploads_per_torrent": 8,
+            "dht": True,
+            "pex": True,
+            "lsd": True,
+            # Allow encrypted and unencrypted peers; requiring encryption shrinks
+            # the available swarm and can reduce throughput.
+            "encryption": 0,
+            "limit_utp_rate": True,
+            "limit_tcp_overhead": True,
         })
+        print(
+            "qBittorrent: performance profile dl=unlimited ul=5MB/s "
+            "peers=500/150 DHT+PeX+LSD=on encryption=allow",
+            flush=True,
+        )
         print("qBittorrent: save=/data/downloads/complete temp=/data/downloads/incomplete", flush=True)
 
         # Sync the WebUI credentials from the shared admin secret so LAN browser

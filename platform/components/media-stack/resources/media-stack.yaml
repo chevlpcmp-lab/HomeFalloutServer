@@ -52,6 +52,10 @@ spec:
               value: "on"
             - name: VPN_PORT_FORWARDING_PROVIDER
               value: protonvpn
+            # Proton only offers incoming NAT-PMP on P2P/port-forward capable
+            # servers. Restrict server selection so qBittorrent always lands on one.
+            - name: PORT_FORWARD_ONLY
+              value: "on"
             - name: VPN_PORT_FORWARDING_UP_COMMAND
               value: >-
                 /bin/sh -c 'wget -qO- --retry-connrefused --post-data
