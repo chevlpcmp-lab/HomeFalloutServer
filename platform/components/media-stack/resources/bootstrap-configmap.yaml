@@ -309,7 +309,7 @@ data:
             # No download ceiling. The GIGA uplink is 50 Mbit/s, so hold torrent
             # payload to ~40 Mbit/s and leave headroom for ACKs, DNS, and WebUIs.
             "dl_limit": 0,
-            "up_limit": 4_883,
+            "up_limit": 5_000_000,
             # Enough peer concurrency to fill a fast line without thrashing the
             # two-CPU qBittorrent container or Gluetun's connection tracking.
             "max_connec": 500,
