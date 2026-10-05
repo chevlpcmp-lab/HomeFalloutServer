@@ -1,0 +1,400 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: phase9-observer
+  namespace: networking
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: phase9-observer
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "pods", "events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["nodes", "pods"]
+    verbs: ["get", "list"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: phase9-observer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: phase9-observer
+subjects:
+  - kind: ServiceAccount
+    name: phase9-observer
+    namespace: networking
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: phase9-status
+  namespace: networking
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: phase9-status }
+  template:
+    metadata:
+      labels: { app: phase9-status }
+    spec:
+      hostNetwork: true
+      nodeSelector:
+        homelab.charles/pool: apps
+      containers:
+        - name: status
+          image: python:3.13-alpine
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              mkdir -p /status
+              exec python3 -m http.server 18080 --bind 0.0.0.0 --directory /status
+          volumeMounts:
+            - { name: status, mountPath: /status, readOnly: true }
+          resources:
+            requests: { cpu: 5m, memory: 16Mi }
+            limits: { cpu: 100m, memory: 64Mi }
+      volumes:
+        - name: status
+          hostPath:
+            path: /home/charles/.local/share/engineering-control/phase9-status
+            type: DirectoryOrCreate
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: phase9-target-prep
+  namespace: networking
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: { app: phase9-target-prep }
+    spec:
+      restartPolicy: Never
+      hostPID: true
+      nodeSelector:
+        homelab.charles/pool: apps
+      containers:
+        - name: prep
+          image: alpine:3.20
+          securityContext:
+            privileged: true
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              apk add --no-cache util-linux >/dev/null
+              nsenter -t 1 -m -u -i -n -p chroot /host /bin/bash <<'HOST'
+              set -euo pipefail
+              STATUS=/home/charles/.local/share/engineering-control/phase9-status
+              REPO=/home/charles/Projects/engineering-control
+              NODE=/home/charles/.local/share/mise/installs/node/24.19.0/bin/node
+              PNPM=/home/charles/.local/share/mise/installs/pnpm/11.23.0/pnpm
+              USER_ENV=(env XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus)
+              mkdir -p "$STATUS"
+              chown -R charles:charles "$STATUS"
+              date --iso-8601=seconds > "$STATUS/target-prep.started"
+              hostnamectl --static > "$STATUS/target-host.txt"
+              free -m > "$STATUS/guest-memory-baseline.txt"
+              cat /proc/meminfo > "$STATUS/guest-meminfo-baseline.txt"
+
+              runuser -u charles -- "${USER_ENV[@]}" systemctl --user is-active engineering-control-daemon.service >/dev/null 2>&1 && {
+                echo "authoritative daemon unexpectedly active before rehearsal" > "$STATUS/target-prep.error"; exit 2;
+              } || true
+              runuser -u charles -- "${USER_ENV[@]}" systemctl --user is-active engineering-control-mcp.service >/dev/null 2>&1 && {
+                echo "authoritative MCP unexpectedly active before rehearsal" > "$STATUS/target-prep.error"; exit 2;
+              } || true
+
+              if [ ! -x /home/charles/.local/lib/engineering-control-litellm/1.104.0/bin/litellm ]; then
+                apt-get update -qq
+                DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3-venv >/dev/null
+                install -d -o charles -g charles /home/charles/.local/lib/engineering-control-litellm
+                runuser -u charles -- python3 -m venv /home/charles/.local/lib/engineering-control-litellm/1.104.0
+                runuser -u charles -- /home/charles/.local/lib/engineering-control-litellm/1.104.0/bin/pip install --disable-pip-version-check --quiet "litellm==1.104.0"
+              fi
+              /home/charles/.local/lib/engineering-control-litellm/1.104.0/bin/litellm --version > "$STATUS/litellm-version.txt" 2>&1 || true
+
+              REV="$(git -C "$REPO" rev-parse --short=12 HEAD)"
+              RELEASE=/home/charles/.local/lib/engineering-control-inspector/releases/${REV}-phase9
+              install -d -o charles -g charles "$RELEASE"
+              rm -rf "$RELEASE/dist" "$RELEASE/package.json" "$RELEASE/node_modules"
+              cp -a "$REPO/dist" "$REPO/package.json" "$RELEASE/"
+              ln -s "$REPO/node_modules" "$RELEASE/node_modules"
+              chown -R charles:charles "$RELEASE"
+              ln -sfn "$RELEASE" /home/charles/.local/lib/engineering-control-inspector/current
+              chown -h charles:charles /home/charles/.local/lib/engineering-control-inspector/current
+
+              docker rm -f ec-phase9-rehearsal-pg >/dev/null 2>&1 || true
+              docker run -d --name ec-phase9-rehearsal-pg --restart no                 -e POSTGRES_HOST_AUTH_METHOD=trust                 -p 127.0.0.1:15446:5432 postgres:18 >/dev/null
+              for i in $(seq 1 60); do
+                docker exec ec-phase9-rehearsal-pg pg_isready -U postgres >/dev/null 2>&1 && break
+                sleep 1
+              done
+              docker exec ec-phase9-rehearsal-pg psql -U postgres -v ON_ERROR_STOP=1                 -c "CREATE ROLE ecdbos LOGIN;"                 -c "CREATE ROLE ecstate LOGIN;"                 -c "CREATE DATABASE ecdbos OWNER ecdbos;"                 -c "CREATE DATABASE ecstate OWNER ecstate;" >/dev/null
+              runuser -u charles -- "$NODE" --input-type=module -e                 "import { PostgresStateStore } from '$REPO/dist/packages/state/src/index.js'; const s=await PostgresStateStore.open('postgresql://ecstate@127.0.0.1:15446/ecstate','99999999-9999-4999-8999-999999999999'); await s.close();"
+              docker exec ec-phase9-rehearsal-pg psql -U ecstate -d ecstate -v ON_ERROR_STOP=1 -c                 "UPDATE engineering_control_state.stream_heads SET authority_mode='canonical', authority_epoch=1, cutover_source_revision=0, cutover_source_sha256=repeat('0',64), qualified_at=now() WHERE stream_id='canonical';" >/dev/null
+
+              cat > "$STATUS/rehearsal-state.env" <<'EOF'
+              ENGINEERING_CONTROL_STATE_BACKEND=postgres
+              ENGINEERING_CONTROL_STATE_DATABASE_URL=postgresql://ecstate@127.0.0.1:15446/ecstate
+              ENGINEERING_CONTROL_STATE_AUTHORITY_ID=99999999-9999-4999-8999-999999999999
+              EOF
+              cat > "$STATUS/rehearsal-durable.env" <<'EOF'
+              ENGINEERING_CONTROL_DURABLE_KERNEL=dbos
+              ENGINEERING_CONTROL_DBOS_SYSTEM_DATABASE_URL=postgresql://ecdbos@127.0.0.1:15446/ecdbos
+              ENGINEERING_CONTROL_DBOS_APPLICATION_VERSION=ec-phase9-rehearsal-v1
+              EOF
+
+              cat > "$STATUS/run-daemon.sh" <<'EOF'
+              #!/bin/bash
+              set -a
+              source /home/charles/.config/engineering-control/production.env
+              source /home/charles/.local/share/engineering-control/phase9-status/rehearsal-state.env
+              source /home/charles/.local/share/engineering-control/phase9-status/rehearsal-durable.env
+              set +a
+              export ENGINEERING_CONTROL_FORGEJO_MODE=shadow
+              exec /home/charles/.local/share/mise/installs/node/24.19.0/bin/node /home/charles/Projects/engineering-control/dist/apps/daemon/src/main.js
+              EOF
+              cat > "$STATUS/run-mcp.sh" <<'EOF'
+              #!/bin/bash
+              set -a
+              source /home/charles/.local/share/engineering-control/phase9-status/rehearsal-state.env
+              set +a
+              export EC_MCP_PORT=18788
+              exec /home/charles/.local/share/mise/installs/node/24.19.0/bin/node /home/charles/Projects/engineering-control/dist/apps/mcp/src/main.js
+              EOF
+              cat > "$STATUS/run-inspector.sh" <<'EOF'
+              #!/bin/bash
+              set -a
+              source /home/charles/.local/share/engineering-control/phase9-status/rehearsal-state.env
+              set +a
+              export EC_INSPECTOR_PROJECT_ID=engineering-control
+              export EC_INSPECTOR_PORT=18789
+              exec /home/charles/.local/share/mise/installs/node/24.19.0/bin/node /home/charles/.local/lib/engineering-control-inspector/current/dist/apps/inspector/src/main.js
+              EOF
+              cat > "$STATUS/run-litellm.sh" <<'EOF'
+              #!/bin/bash
+              set -a
+              source /home/charles/.config/engineering-control/litellm.env
+              set +a
+              exec /home/charles/.local/lib/engineering-control-litellm/1.104.0/bin/litellm --config /home/charles/Projects/engineering-control/deploy/litellm/config.yaml --host 127.0.0.1 --port 14000
+              EOF
+              cat > "$STATUS/run-workload.sh" <<'EOF'
+              #!/bin/bash
+              set -o pipefail
+              cd /home/charles/Projects/engineering-control
+              /home/charles/.local/share/mise/installs/pnpm/11.23.0/pnpm build &&
+              /home/charles/.local/share/mise/installs/pnpm/11.23.0/pnpm typecheck
+              rc=$?
+              printf '%s\n' "$rc" > /home/charles/.local/share/engineering-control/phase9-status/ec-workload.exit
+              exit "$rc"
+              EOF
+              cat > "$STATUS/cleanup.sh" <<'EOF'
+              #!/bin/bash
+              set +e
+              U=(env XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus)
+              for unit in phase9-rehearsal-daemon phase9-rehearsal-mcp phase9-rehearsal-inspector phase9-rehearsal-litellm phase9-ec-workload; do
+                runuser -u charles -- "${U[@]}" systemctl --user stop "$unit.service" >/dev/null 2>&1 || true
+              done
+              docker rm -f ec-phase9-rehearsal-pg >/dev/null 2>&1 || true
+              date --iso-8601=seconds > /home/charles/.local/share/engineering-control/phase9-status/cleanup.done
+              EOF
+              chmod 700 "$STATUS"/*.sh
+              chown charles:charles "$STATUS"/*
+
+              for unit in phase9-rehearsal-daemon phase9-rehearsal-mcp phase9-rehearsal-inspector phase9-rehearsal-litellm phase9-ec-workload; do
+                runuser -u charles -- "${USER_ENV[@]}" systemctl --user stop "$unit.service" >/dev/null 2>&1 || true
+                runuser -u charles -- "${USER_ENV[@]}" systemctl --user reset-failed "$unit.service" >/dev/null 2>&1 || true
+              done
+              runuser -u charles -- "${USER_ENV[@]}" systemd-run --user --unit=phase9-rehearsal-daemon --property=MemoryMax=1024M "$STATUS/run-daemon.sh" >/dev/null
+              runuser -u charles -- "${USER_ENV[@]}" systemd-run --user --unit=phase9-rehearsal-mcp --property=MemoryMax=512M "$STATUS/run-mcp.sh" >/dev/null
+              runuser -u charles -- "${USER_ENV[@]}" systemd-run --user --unit=phase9-rehearsal-inspector --property=MemoryMax=512M "$STATUS/run-inspector.sh" >/dev/null
+              runuser -u charles -- "${USER_ENV[@]}" systemd-run --user --unit=phase9-rehearsal-litellm --property=MemoryMax=768M "$STATUS/run-litellm.sh" >/dev/null
+              runuser -u charles -- "${USER_ENV[@]}" systemd-run --user --unit=phase9-ec-workload --property=MemoryMax=1536M "$STATUS/run-workload.sh" >/dev/null
+
+              for url in http://127.0.0.1:3000/readyz http://127.0.0.1:18788/readyz http://127.0.0.1:18789/readyz; do
+                ok=0
+                for i in $(seq 1 60); do
+                  curl -fsS --max-time 2 "$url" >/dev/null 2>&1 && { ok=1; break; }
+                  sleep 1
+                done
+                test "$ok" = 1
+              done
+              for i in $(seq 1 60); do
+                ss -H -ltn | awk '{print $4}' | grep -Eq '(^|:)14000$' && break
+                sleep 1
+              done
+              ss -H -ltn | awk '{print $4}' | grep -Eq '(^|:)14000$'
+
+              {
+                echo "daemon=ready"
+                echo "mcp=ready"
+                echo "inspector=ready"
+                echo "litellm=listening"
+              } > "$STATUS/ec-rehearsal.ready"
+              runuser -u charles -- "${USER_ENV[@]}" systemctl --user status                 phase9-rehearsal-daemon.service phase9-rehearsal-mcp.service                 phase9-rehearsal-inspector.service phase9-rehearsal-litellm.service                 --no-pager > "$STATUS/ec-rehearsal-systemd.txt" 2>&1 || true
+
+              systemd-run --unit=phase9-rehearsal-cleanup --on-active=12m /bin/bash "$STATUS/cleanup.sh" >/dev/null
+              date --iso-8601=seconds > "$STATUS/target-prep.done"
+              HOST
+          volumeMounts:
+            - { name: host-root, mountPath: /host }
+          resources:
+            requests: { cpu: 20m, memory: 32Mi }
+            limits: { cpu: 500m, memory: 128Mi }
+      volumes:
+        - name: host-root
+          hostPath:
+            path: /
+            type: Directory
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: phase9-media-load
+  namespace: media
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: { app: phase9-media-load }
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        homelab.charles/pool: media
+      containers:
+        - name: load
+          image: python:3.13-alpine
+          env:
+            - name: QB_USER
+              valueFrom: { secretKeyRef: { name: apps-admin, key: USERNAME } }
+            - name: QB_PASS
+              valueFrom: { secretKeyRef: { name: apps-admin, key: PASSWORD } }
+            - name: JELLYFIN_API_KEY
+              valueFrom: { secretKeyRef: { name: homarr-secrets, key: JELLYFIN_API_KEY } }
+          command: ["python3", "-c"]
+          args:
+            - |
+              import http.cookiejar, json, os, pathlib, time, urllib.parse, urllib.request, xml.etree.ElementTree as ET
+              time.sleep(60)
+              def request(url, method="GET", data=None, headers=None, opener=None):
+                  body = None
+                  if data is not None:
+                      if isinstance(data, dict):
+                          body = urllib.parse.urlencode(data).encode()
+                      elif isinstance(data, str):
+                          body = data.encode()
+                      else:
+                          body = data
+                  req = urllib.request.Request(url, data=body, method=method, headers=headers or {})
+                  with (opener or urllib.request).open(req, timeout=30) as response:
+                      return response.read()
+              jar = http.cookiejar.CookieJar()
+              opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+              qb = "http://qbittorrent.media.svc.cluster.local"
+              login = request(qb + "/api/v2/auth/login", "POST", {"username": os.environ["QB_USER"], "password": os.environ["QB_PASS"]}, opener=opener).decode().strip()
+              if login != "Ok.":
+                  raise RuntimeError("qBittorrent login failed")
+              torrents = json.loads(request(qb + "/api/v2/torrents/info", opener=opener))
+              selected = sorted(torrents, key=lambda t: int(t.get("total_size") or t.get("size") or 0), reverse=True)[:3]
+              hashes = "|".join(t["hash"] for t in selected)
+              print("qBittorrent selected:", [(t["name"], t.get("total_size") or t.get("size")) for t in selected], flush=True)
+              if hashes:
+                  request(qb + "/api/v2/torrents/recheck", "POST", {"hashes": hashes}, opener=opener)
+
+              def arr_key(path):
+                  root = ET.parse(path).getroot()
+                  key = root.findtext("ApiKey")
+                  if not key:
+                      raise RuntimeError("missing ApiKey in " + path)
+                  return key
+              for name, base, config, command in [
+                  ("Radarr", "http://radarr.media.svc.cluster.local", "/config/radarr/config.xml", "RescanMovie"),
+                  ("Sonarr", "http://sonarr.media.svc.cluster.local", "/config/sonarr/config.xml", "RescanSeries"),
+              ]:
+                  key = arr_key(config)
+                  payload = json.dumps({"name": command}).encode()
+                  request(base + "/api/v3/command", "POST", payload, {"X-Api-Key": key, "Content-Type": "application/json"})
+                  print(name, command, "submitted", flush=True)
+              request("http://jellyfin.media.svc.cluster.local:8096/Library/Refresh", "POST", b"", {"X-Emby-Token": os.environ["JELLYFIN_API_KEY"]})
+              print("Jellyfin Library/Refresh submitted", flush=True)
+
+              deadline = time.time() + 420
+              while time.time() < deadline and hashes:
+                  current = json.loads(request(qb + "/api/v2/torrents/info", opener=opener))
+                  states = {t["hash"]: t["state"] for t in current if t["hash"] in set(hashes.split("|"))}
+                  print("qBittorrent states", states, flush=True)
+                  if states and all(not s.lower().startswith("checking") for s in states.values()):
+                      break
+                  time.sleep(15)
+              print("phase9 media workload complete", flush=True)
+          volumeMounts:
+            - { name: radarr-config, mountPath: /config/radarr, readOnly: true }
+            - { name: sonarr-config, mountPath: /config/sonarr, readOnly: true }
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { cpu: 250m, memory: 128Mi }
+      volumes:
+        - { name: radarr-config, persistentVolumeClaim: { claimName: config-radarr } }
+        - { name: sonarr-config, persistentVolumeClaim: { claimName: config-sonarr } }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: phase9-cluster-monitor
+  namespace: networking
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: { app: phase9-cluster-monitor }
+    spec:
+      serviceAccountName: phase9-observer
+      restartPolicy: Never
+      nodeSelector:
+        homelab.charles/pool: apps
+      containers:
+        - name: monitor
+          image: bitnami/kubectl:1.33.4
+          command: ["/bin/bash", "-ec"]
+          args:
+            - |
+              STATUS=/status
+              mkdir -p "$STATUS"
+              date --iso-8601=seconds > "$STATUS/cluster-monitor.started"
+              kubectl top nodes > "$STATUS/k8s-top-baseline.txt" 2>&1 || true
+              kubectl get nodes -o wide > "$STATUS/k8s-nodes-baseline.txt"
+              kubectl get pods -A -o wide > "$STATUS/k8s-pods-baseline.txt"
+              kubectl get events -A --sort-by=.lastTimestamp > "$STATUS/k8s-events-baseline.txt" 2>&1 || true
+              sleep 480
+              kubectl top nodes > "$STATUS/k8s-top-final.txt" 2>&1 || true
+              kubectl get nodes -o wide > "$STATUS/k8s-nodes-final.txt"
+              kubectl get nodes -o json > "$STATUS/k8s-nodes-final.json"
+              kubectl get pods -A -o wide > "$STATUS/k8s-pods-final.txt"
+              kubectl get pods -A -o json > "$STATUS/k8s-pods-final.json"
+              kubectl get events -A --sort-by=.lastTimestamp > "$STATUS/k8s-events-final.txt" 2>&1 || true
+              kubectl get job -n media phase9-media-load -o wide > "$STATUS/media-job.txt" 2>&1 || true
+              kubectl logs -n media job/phase9-media-load > "$STATUS/media-job.log" 2>&1 || true
+              kubectl logs -n networking job/phase9-target-prep > "$STATUS/target-prep.log" 2>&1 || true
+              grep -Ei 'oom|evict|memorypressure' "$STATUS/k8s-events-final.txt" > "$STATUS/k8s-memory-events.txt" || true
+              date --iso-8601=seconds > "$STATUS/cluster-monitor.done"
+          volumeMounts:
+            - { name: status, mountPath: /status }
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { cpu: 250m, memory: 128Mi }
+      volumes:
+        - name: status
+          hostPath:
+            path: /home/charles/.local/share/engineering-control/phase9-status
+            type: DirectoryOrCreate
