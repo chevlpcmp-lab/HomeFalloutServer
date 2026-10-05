@@ -63,23 +63,46 @@ spec:
             requests: { cpu: 5m, memory: 16Mi }
             limits: { cpu: 100m, memory: 64Mi }
         - name: observer
-          image: bitnami/kubectl:1.33.4
-          command: ["/bin/bash", "-ec"]
+          image: python:3.13-alpine
+          command: ["python3", "-c"]
           args:
             - |
-              while true; do
-                date --iso-8601=seconds > /status/observer-time.txt
-                kubectl get jobs -A -o wide > /status/jobs-live.txt 2>&1 || true
-                kubectl get pods -A -o wide > /status/pods-live.txt 2>&1 || true
-                kubectl get events -A --sort-by=.lastTimestamp > /status/events-live.txt 2>&1 || true
-                kubectl top nodes > /status/top-live.txt 2>&1 || true
-                sleep 10
-              done
+              import json, os, ssl, time, urllib.request
+              root = "/var/run/secrets/kubernetes.io/serviceaccount"
+              token = open(root + "/token", encoding="utf-8").read().strip()
+              context = ssl.create_default_context(cafile=root + "/ca.crt")
+              base = "https://" + os.environ["KUBERNETES_SERVICE_HOST"] + ":" + os.environ["KUBERNETES_SERVICE_PORT"]
+              headers = {"Authorization": "Bearer " + token}
+              def get(path):
+                  req = urllib.request.Request(base + path, headers=headers)
+                  with urllib.request.urlopen(req, context=context, timeout=10) as response:
+                      return json.load(response)
+              def write(name, value):
+                  tmp = "/status/." + name + ".tmp"
+                  with open(tmp, "w", encoding="utf-8") as handle:
+                      json.dump(value, handle, indent=2)
+                      handle.write("\n")
+                  os.replace(tmp, "/status/" + name)
+              while True:
+                  try:
+                      write("jobs-live.json", get("/apis/batch/v1/jobs"))
+                      write("pods-live.json", get("/api/v1/pods"))
+                      write("nodes-live.json", get("/api/v1/nodes"))
+                      write("events-live.json", get("/api/v1/events"))
+                      try:
+                          write("metrics-nodes-live.json", get("/apis/metrics.k8s.io/v1beta1/nodes"))
+                      except Exception as error:
+                          write("metrics-error.json", {"error": str(error)})
+                      with open("/status/observer-time.txt", "w", encoding="utf-8") as handle:
+                          handle.write(time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()) + "\n")
+                  except Exception as error:
+                      write("observer-error.json", {"error": str(error)})
+                  time.sleep(10)
           volumeMounts:
             - { name: status, mountPath: /status }
           resources:
-            requests: { cpu: 5m, memory: 16Mi }
-            limits: { cpu: 100m, memory: 64Mi }
+            requests: { cpu: 5m, memory: 20Mi }
+            limits: { cpu: 100m, memory: 96Mi }
       volumes:
         - name: status
           hostPath:
