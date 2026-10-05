@@ -10,7 +10,7 @@ metadata:
   name: phase9-capacity-monitor
 rules:
   - apiGroups: [""]
-    resources: ["nodes", "pods", "events"]
+    resources: ["nodes", "pods", "pods/log", "events"]
     verbs: ["get", "list"]
   - apiGroups: ["metrics.k8s.io"]
     resources: ["nodes", "pods"]
@@ -252,3 +252,51 @@ spec:
         - name: sonarr
           persistentVolumeClaim:
             claimName: config-sonarr
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: phase9-capacity-log-collector-20261005
+  namespace: networking
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: phase9-capacity-monitor
+      nodeSelector:
+        homelab.charles/pool: apps
+      containers:
+        - name: collect
+          image: python:3.13-alpine
+          command: ["python3", "-c"]
+          args:
+            - |
+              import json, os, ssl, urllib.parse, urllib.request
+              root = "https://%s:%s" % (os.environ["KUBERNETES_SERVICE_HOST"], os.environ["KUBERNETES_SERVICE_PORT_HTTPS"])
+              token = open("/var/run/secrets/kubernetes.io/serviceaccount/token").read().strip()
+              ctx = ssl.create_default_context(cafile="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
+              def get(path):
+                  req = urllib.request.Request(root + path, headers={"Authorization": "Bearer " + token})
+                  with urllib.request.urlopen(req, context=ctx, timeout=10) as response:
+                      return response.read()
+              selector = urllib.parse.quote("app.kubernetes.io/name=phase9-capacity-media")
+              pods = json.loads(get("/api/v1/namespaces/media/pods?labelSelector=" + selector))
+              items = sorted(pods.get("items", []), key=lambda x: x["metadata"].get("creationTimestamp", ""))
+              if not items:
+                  raise RuntimeError("capacity media pod not found")
+              pod = items[-1]
+              name = pod["metadata"]["name"]
+              os.makedirs("/hostout", exist_ok=True)
+              open("/hostout/media-load-status.json", "wb").write(json.dumps(pod["status"], indent=2).encode())
+              log = get("/api/v1/namespaces/media/pods/" + name + "/log?container=load")
+              open("/hostout/media-load.log", "wb").write(log)
+              print(name)
+          volumeMounts:
+            - name: out
+              mountPath: /hostout
+      volumes:
+        - name: out
+          hostPath:
+            path: /var/lib/phase9-capacity
+            type: DirectoryOrCreate
