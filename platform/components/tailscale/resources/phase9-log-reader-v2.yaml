@@ -1,0 +1,78 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: phase9-log-reader-v2
+  namespace: networking
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: phase9-log-reader-v2
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: phase9-log-reader-v2
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: phase9-log-reader-v2
+subjects:
+  - kind: ServiceAccount
+    name: phase9-log-reader-v2
+    namespace: networking
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: phase9-log-reader-v2-20261005
+  namespace: networking
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: phase9-log-reader-v2
+      nodeSelector:
+        homelab.charles/pool: apps
+      containers:
+        - name: collect
+          image: python:3.13-alpine
+          command: ["python3", "-c"]
+          args:
+            - |
+              import json, os, ssl, urllib.parse, urllib.request
+              root = "https://%s:%s" % (
+                  os.environ["KUBERNETES_SERVICE_HOST"],
+                  os.environ["KUBERNETES_SERVICE_PORT_HTTPS"],
+              )
+              token = open("/var/run/secrets/kubernetes.io/serviceaccount/token").read().strip()
+              ctx = ssl.create_default_context(cafile="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
+              def get(path):
+                  req = urllib.request.Request(root + path, headers={"Authorization": "Bearer " + token})
+                  with urllib.request.urlopen(req, context=ctx, timeout=10) as response:
+                      return response.read()
+              selector = urllib.parse.quote("app.kubernetes.io/name=phase9-capacity-media")
+              pods = json.loads(get("/api/v1/namespaces/media/pods?labelSelector=" + selector))
+              items = sorted(pods.get("items", []), key=lambda x: x["metadata"].get("creationTimestamp", ""))
+              if not items:
+                  raise RuntimeError("phase9 capacity media pod not found")
+              pod = items[-1]
+              name = pod["metadata"]["name"]
+              os.makedirs("/hostout", exist_ok=True)
+              open("/hostout/media-load-status-v2.json", "w").write(json.dumps(pod["status"], indent=2) + "\n")
+              log = get("/api/v1/namespaces/media/pods/" + name + "/log?container=load")
+              open("/hostout/media-load-v2.log", "wb").write(log)
+              print(name)
+          volumeMounts:
+            - name: out
+              mountPath: /hostout
+      volumes:
+        - name: out
+          hostPath:
+            path: /var/lib/phase9-capacity
+            type: DirectoryOrCreate
