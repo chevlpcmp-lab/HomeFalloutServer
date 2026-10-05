@@ -67,7 +67,7 @@ spec:
           args:
             - |
               apk add --no-cache util-linux >/dev/null
-              nsenter -t 1 -m -n chroot /host /bin/bash <<'HOST'
+              nsenter -t 1 -n chroot /host /bin/bash <<'HOST'
               set -euo pipefail
               STATUS=/home/charles/.local/share/engineering-control/phase9-status
               REPO=/home/charles/Projects/engineering-control
