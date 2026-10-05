@@ -1,0 +1,67 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: phase9-final-restore-126294-v4
+  namespace: networking
+  labels:
+    app.kubernetes.io/name: phase9-final-restore
+    app.kubernetes.io/part-of: homefallout-recovery
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        homelab.charles/pool: apps
+      containers:
+        - name: restore
+          image: docker:29.1.3-cli
+          securityContext:
+            runAsUser: 0
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              B=/bundle
+              test -f "$B/ecdbos.dump"
+              test -f "$B/ecstate.dump"
+              test -f "$B/forgejo-home.tgz"
+              cd "$B"
+              sha256sum -c SHA256SUMS
+              if ! docker inspect p9-target-db2 >/dev/null 2>&1; then
+                docker run -d --rm --name p9-target-db2 -v engineering-control-dbos-postgres-data:/var/lib/postgresql postgres:18 >/dev/null
+              fi
+              for i in $(seq 1 80); do
+                docker exec p9-target-db2 pg_isready -U ecdbos -d ecdbos >/dev/null 2>&1 && break
+                sleep 1
+              done
+              docker exec p9-target-db2 pg_isready -U ecdbos -d ecdbos
+              cat "$B/ecdbos.dump" | docker exec -i p9-target-db2 pg_restore -U ecdbos --clean --if-exists -d ecdbos
+              cat "$B/ecstate.dump" | docker exec -i p9-target-db2 pg_restore -U ecdbos --clean --if-exists -d ecstate
+              REV="$(docker exec p9-target-db2 psql -U ecstate -d ecstate -Atqc "select revision from engineering_control_state.stream_heads where stream_id='canonical'")"
+              HASH="$(docker exec p9-target-db2 psql -U ecstate -d ecstate -Atqc "select projection_sha256 from engineering_control_state.stream_heads where stream_id='canonical'")"
+              COUNT="$(docker exec p9-target-db2 psql -U ecstate -d ecstate -Atqc "select count(*) from engineering_control_state.events where stream_id='canonical'")"
+              test "$REV" = "126294"
+              tar -C /hosthome -xzf "$B/forgejo-home.tgz"
+              chown -R 1000:1000 /hosthome/.local/share/forgejo /hosthome/.config/forgejo
+              printf 'revision=%s\nprojection_sha256=%s\nevents=%s\n' "$REV" "$HASH" "$COUNT" | tee /dev/termination-log
+          volumeMounts:
+            - name: docker-sock
+              mountPath: /var/run/docker.sock
+            - name: bundle
+              mountPath: /bundle
+              readOnly: true
+            - name: hosthome
+              mountPath: /hosthome
+      volumes:
+        - name: docker-sock
+          hostPath:
+            path: /var/run/docker.sock
+            type: Socket
+        - name: bundle
+          hostPath:
+            path: /home/charles/phase9-authority-bundle
+            type: Directory
+        - name: hosthome
+          hostPath:
+            path: /home/charles
+            type: Directory
