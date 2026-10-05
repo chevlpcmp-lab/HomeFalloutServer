@@ -133,14 +133,14 @@ spec:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: phase9-target-prep-v3
+  name: phase9-target-prep-v4
   namespace: networking
 spec:
   backoffLimit: 0
   ttlSecondsAfterFinished: 3600
   template:
     metadata:
-      labels: { app: phase9-target-prep-v3 }
+      labels: { app: phase9-target-prep-v4 }
     spec:
       restartPolicy: Never
       hostPID: true
@@ -154,7 +154,8 @@ spec:
           command: ["/bin/sh", "-ec"]
           args:
             - |
-              chroot /host /bin/bash <<'HOST'
+              apk add --no-cache util-linux >/dev/null
+              nsenter -t 1 -n chroot /host /bin/bash <<'HOST'
               set -euo pipefail
               STATUS=/home/charles/.local/share/engineering-control/phase9-status
               REPO=/home/charles/Projects/engineering-control
