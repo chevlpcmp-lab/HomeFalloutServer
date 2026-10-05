@@ -45,6 +45,7 @@ spec:
     metadata:
       labels: { app: phase9-status }
     spec:
+      serviceAccountName: phase9-observer
       hostNetwork: true
       nodeSelector:
         homelab.charles/pool: apps
@@ -58,6 +59,24 @@ spec:
               exec python3 -m http.server 18080 --bind 0.0.0.0 --directory /status
           volumeMounts:
             - { name: status, mountPath: /status, readOnly: true }
+          resources:
+            requests: { cpu: 5m, memory: 16Mi }
+            limits: { cpu: 100m, memory: 64Mi }
+        - name: observer
+          image: bitnami/kubectl:1.33.4
+          command: ["/bin/bash", "-ec"]
+          args:
+            - |
+              while true; do
+                date --iso-8601=seconds > /status/observer-time.txt
+                kubectl get jobs -A -o wide > /status/jobs-live.txt 2>&1 || true
+                kubectl get pods -A -o wide > /status/pods-live.txt 2>&1 || true
+                kubectl get events -A --sort-by=.lastTimestamp > /status/events-live.txt 2>&1 || true
+                kubectl top nodes > /status/top-live.txt 2>&1 || true
+                sleep 10
+              done
+          volumeMounts:
+            - { name: status, mountPath: /status }
           resources:
             requests: { cpu: 5m, memory: 16Mi }
             limits: { cpu: 100m, memory: 64Mi }
