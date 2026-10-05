@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: phase9-final-restore-126294
+  name: phase9-final-restore-126294-v2
   namespace: networking
   labels:
     app.kubernetes.io/name: phase9-final-restore
@@ -24,14 +24,15 @@ spec:
           command: ["/bin/sh", "-ec"]
           args:
             - |
-              B=/hosthome/.local/share/engineering-control/backups/phase9-final-20261005
-              test -f "$B/ecdbos.dump"
+              DUMP="$(find /hosthome -path '*/phase9-final-20261005/ecdbos.dump' -print -quit)"
+              test -n "$DUMP"
+              B="$(dirname "$DUMP")"
               test -f "$B/ecstate.dump"
               test -f "$B/forgejo-home.tgz"
               cd "$B"
               sha256sum -c SHA256SUMS
               if ! docker inspect p9-target-db2 >/dev/null 2>&1; then
-                docker run -d --rm --name p9-target-db2                   -v engineering-control-dbos-postgres-data:/var/lib/postgresql                   postgres:18 >/dev/null
+                docker run -d --rm --name p9-target-db2 -v engineering-control-dbos-postgres-data:/var/lib/postgresql postgres:18 >/dev/null
               fi
               for i in $(seq 1 80); do
                 docker exec p9-target-db2 pg_isready -U ecdbos -d ecdbos >/dev/null 2>&1 && break
@@ -49,8 +50,8 @@ spec:
               fi
               tar -C /hosthome -xzf "$B/forgejo-home.tgz"
               chown -R 1000:1000 /hosthome/.local/share/forgejo /hosthome/.config/forgejo
-              printf 'revision=%s\nprojection_sha256=%s\nevents=%s\nrestored_at=%s\n' "$REV" "$HASH" "$COUNT" "$(date -u +%FT%TZ)" > "$B/RESTORE_OK"
-              echo "phase9 final restore complete revision=$REV events=$COUNT"
+              printf 'bundle=%s\nrevision=%s\nprojection_sha256=%s\nevents=%s\nrestored_at=%s\n' "$B" "$REV" "$HASH" "$COUNT" "$(date -u +%FT%TZ)" > "$B/RESTORE_OK"
+              printf 'phase9 final restore complete bundle=%s revision=%s events=%s\n' "$B" "$REV" "$COUNT" | tee /dev/termination-log
           volumeMounts:
             - name: docker-sock
               mountPath: /var/run/docker.sock
