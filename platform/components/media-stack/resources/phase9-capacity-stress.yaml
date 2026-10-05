@@ -1,0 +1,75 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: phase9-capacity-stress-v1
+  namespace: media
+  labels:
+    app.kubernetes.io/name: phase9-capacity-stress
+    app.kubernetes.io/part-of: phase9-qualification
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: phase9-capacity-stress
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        homelab.charles/pool: media
+      containers:
+        - name: stress
+          image: alpine:3.20
+          securityContext:
+            runAsUser: 0
+          env:
+            - name: ADMIN_USER
+              valueFrom:
+                secretKeyRef: { name: apps-admin, key: USERNAME }
+            - name: ADMIN_PASS
+              valueFrom:
+                secretKeyRef: { name: apps-admin, key: PASSWORD }
+            - name: JELLYFIN_API_KEY
+              valueFrom:
+                secretKeyRef: { name: homarr-secrets, key: JELLYFIN_API_KEY }
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              apk add --no-cache curl jq coreutils >/dev/null
+              RADARR_KEY="$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /config/radarr/config.xml | head -1)"
+              SONARR_KEY="$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /config/sonarr/config.xml | head -1)"
+              test -n "$RADARR_KEY" && test -n "$SONARR_KEY" && test -n "$JELLYFIN_API_KEY"
+
+              curl -fsS -c /tmp/qbit.cookie                 --data-urlencode "username=$ADMIN_USER"                 --data-urlencode "password=$ADMIN_PASS"                 http://qbittorrent.media.svc.cluster.local/api/v2/auth/login >/dev/null
+              curl -fsS -b /tmp/qbit.cookie                 http://qbittorrent.media.svc.cluster.local/api/v2/torrents/info > /tmp/torrents.json
+              HASHES="$(jq -r '.[].hash' /tmp/torrents.json | paste -sd '|' -)"
+              if [ -n "$HASHES" ]; then
+                curl -fsS -b /tmp/qbit.cookie -X POST                   --data-urlencode "hashes=$HASHES"                   http://qbittorrent.media.svc.cluster.local/api/v2/torrents/recheck >/dev/null
+              fi
+
+              curl -fsS -X POST -H "X-Api-Key: $RADARR_KEY" -H 'Content-Type: application/json'                 -d '{"name":"RescanMovie"}' http://radarr.media.svc.cluster.local/api/v3/command >/dev/null
+              curl -fsS -X POST -H "X-Api-Key: $SONARR_KEY" -H 'Content-Type: application/json'                 -d '{"name":"RescanSeries"}' http://sonarr.media.svc.cluster.local/api/v3/command >/dev/null
+              curl -fsS -X POST                 "http://jellyfin.media.svc.cluster.local:8096/Library/Refresh?api_key=$JELLYFIN_API_KEY" >/dev/null
+
+              find /data -type f -size +512M -print | head -n 8 > /tmp/large-files.txt || true
+              jobs=0
+              while IFS= read -r f; do
+                [ -n "$f" ] || continue
+                timeout 120 sha256sum "$f" >/dev/null &
+                jobs=$((jobs+1))
+              done < /tmp/large-files.txt
+              wait || true
+
+              qcount="$(jq 'length' /tmp/torrents.json)"
+              printf 'phase9-media-stress complete torrents=%s hashed_files=%s\n' "$qcount" "$jobs"
+          resources:
+            requests: { cpu: 100m, memory: 64Mi }
+            limits: { cpu: "4", memory: 256Mi }
+          volumeMounts:
+            - { name: config-radarr, mountPath: /config/radarr, readOnly: true }
+            - { name: config-sonarr, mountPath: /config/sonarr, readOnly: true }
+            - { name: media-data, mountPath: /data, readOnly: true }
+      volumes:
+        - { name: config-radarr, persistentVolumeClaim: { claimName: config-radarr } }
+        - { name: config-sonarr, persistentVolumeClaim: { claimName: config-sonarr } }
+        - { name: media-data, persistentVolumeClaim: { claimName: media-data } }
