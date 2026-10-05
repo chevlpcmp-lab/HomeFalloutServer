@@ -12,6 +12,9 @@ rules:
   - apiGroups: [""]
     resources: ["nodes", "pods", "events"]
     verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
   - apiGroups: ["metrics.k8s.io"]
     resources: ["nodes", "pods"]
     verbs: ["get", "list"]
@@ -93,6 +96,24 @@ spec:
                           write("metrics-nodes-live.json", get("/apis/metrics.k8s.io/v1beta1/nodes"))
                       except Exception as error:
                           write("metrics-error.json", {"error": str(error)})
+                      pods = get("/api/v1/pods").get("items", [])
+                      for pod in pods:
+                          name = pod.get("metadata", {}).get("name", "")
+                          namespace = pod.get("metadata", {}).get("namespace", "default")
+                          if "phase9" not in name.lower():
+                              continue
+                          try:
+                              req = urllib.request.Request(
+                                  base + "/api/v1/namespaces/" + namespace + "/pods/" + name + "/log?timestamps=true",
+                                  headers=headers,
+                              )
+                              with urllib.request.urlopen(req, context=context, timeout=10) as response:
+                                  data = response.read().decode("utf-8", errors="replace")
+                              with open("/status/log-" + namespace + "-" + name + ".txt", "w", encoding="utf-8") as handle:
+                                  handle.write(data)
+                          except Exception as error:
+                              with open("/status/log-" + namespace + "-" + name + ".error.txt", "w", encoding="utf-8") as handle:
+                                  handle.write(str(error) + "\n")
                       with open("/status/observer-time.txt", "w", encoding="utf-8") as handle:
                           handle.write(time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()) + "\n")
                   except Exception as error:
