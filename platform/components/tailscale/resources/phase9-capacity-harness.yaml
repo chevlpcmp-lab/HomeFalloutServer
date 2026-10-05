@@ -133,14 +133,14 @@ spec:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: phase9-target-prep-v2
+  name: phase9-target-prep-v3
   namespace: networking
 spec:
   backoffLimit: 0
   ttlSecondsAfterFinished: 3600
   template:
     metadata:
-      labels: { app: phase9-target-prep-v2 }
+      labels: { app: phase9-target-prep-v3 }
     spec:
       restartPolicy: Never
       hostPID: true
@@ -184,7 +184,7 @@ spec:
               fi
               /home/charles/.local/lib/engineering-control-litellm/1.104.0/bin/litellm --version > "$STATUS/litellm-version.txt" 2>&1 || true
 
-              REV="$(git -C "$REPO" rev-parse --short=12 HEAD)"
+              REV="$(runuser -u charles -- git -C "$REPO" rev-parse --short=12 HEAD)"
               RELEASE=/home/charles/.local/lib/engineering-control-inspector/releases/${REV}-phase9
               install -d -o charles -g charles "$RELEASE"
               rm -rf "$RELEASE/dist" "$RELEASE/package.json" "$RELEASE/node_modules"
