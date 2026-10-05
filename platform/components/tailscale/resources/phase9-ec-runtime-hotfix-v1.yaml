@@ -1,0 +1,226 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: phase9-ec-runtime-hotfix-v1
+  namespace: networking
+  labels:
+    app.kubernetes.io/name: phase9-ec-runtime-hotfix
+    app.kubernetes.io/part-of: homefallout-recovery
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: phase9-ec-runtime-hotfix
+    spec:
+      restartPolicy: Never
+      hostPID: true
+      nodeSelector:
+        homelab.charles/pool: apps
+      containers:
+        - name: hotfix
+          image: alpine:3.20
+          securityContext:
+            privileged: true
+            runAsUser: 0
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              apk add --no-cache util-linux >/dev/null
+              cp /hotfix/phase9-hotfix.sh /host/tmp/phase9-hotfix.sh
+              chmod 0755 /host/tmp/phase9-hotfix.sh
+              nsenter -t 1 -m -u -i -n -p -- chroot /host /bin/bash /tmp/phase9-hotfix.sh
+          volumeMounts:
+            - name: host-root
+              mountPath: /host
+            - name: hotfix
+              mountPath: /hotfix
+      volumes:
+        - name: host-root
+          hostPath:
+            path: /
+            type: Directory
+        - name: hotfix
+          configMap:
+            name: phase9-ec-runtime-hotfix-v1
+            defaultMode: 0555
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: phase9-ec-runtime-hotfix-v1
+  namespace: networking
+data:
+  phase9-hotfix.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    HOME=/home/charles
+    REPO="$HOME/Projects/engineering-control"
+    PNPM="$HOME/.local/share/mise/installs/pnpm/11.23.0/pnpm"
+    USER_ENV=(env HOME="$HOME" XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus)
+    as_charles() { runuser -u charles -- "${USER_ENV[@]}" "$@"; }
+    restore_operator_surface() {
+      as_charles systemctl --user start engineering-control-inspector.service engineering-control-mcp.service engineering-control-tunnel.service engineering-control-inspector-tunnel.service >/dev/null 2>&1 || true
+    }
+    trap restore_operator_surface EXIT
+
+    as_charles systemctl --user stop engineering-control-daemon.service engineering-control-bootstrap-reconcile.timer engineering-control-mcp.service engineering-control-inspector.service engineering-control-tunnel.service engineering-control-inspector-tunnel.service
+    test "$(as_charles systemctl --user is-active engineering-control-daemon.service 2>/dev/null || true)" != active
+    test "$(as_charles systemctl --user is-active engineering-control-bootstrap-reconcile.timer 2>/dev/null || true)" != active
+    test -z "$(as_charles git -C "$REPO" status --porcelain)"
+    test "$(as_charles git -C "$REPO" rev-parse HEAD)" = "b03c389dba545bf52d55a72bf8f66ff52ae61def"
+    ! ss -H -ltn | awk '{print $4}' | grep -Eq '(^|:)3001$'
+
+    cat > /tmp/phase9-patch.py <<'PY'
+    from pathlib import Path
+
+    root = Path("/home/charles/Projects/engineering-control")
+
+    def replace(path, old, new, count=1):
+        p = root / path
+        text = p.read_text()
+        actual = text.count(old)
+        if actual != count:
+            raise SystemExit(f"{path}: expected {count} occurrence(s), found {actual}: {old!r}")
+        p.write_text(text.replace(old, new))
+
+    replace(
+        "apps/daemon/src/main.ts",
+        '  const daemon = new DaemonHost({ service: createProductionControlService({ workspaceDirectory }) });',
+        '''  const daemonUrl = new URL(process.env.ENGINEERING_CONTROL_DAEMON_URL ?? "http://127.0.0.1:3000");
+      if (daemonUrl.protocol !== "http:" || daemonUrl.username !== "" || daemonUrl.password !== "" ||
+          daemonUrl.pathname !== "/" || daemonUrl.search !== "" || daemonUrl.hash !== "") {
+        throw new Error("ENGINEERING_CONTROL_DAEMON_URL must be an unauthenticated HTTP origin.");
+      }
+      const daemonPort = Number.parseInt(daemonUrl.port === "" ? "80" : daemonUrl.port, 10);
+      const daemon = new DaemonHost({
+        service: createProductionControlService({ workspaceDirectory }),
+        host: daemonUrl.hostname,
+        port: daemonPort
+      });'''
+    )
+
+    replace(
+        "apps/mcp/src/operator.ts",
+        '''async function defaultDaemonStatusReader(): Promise<unknown> {
+      return (await fetch("http://127.0.0.1:3000/v1/status", { signal: AbortSignal.timeout(2_000) })).json();
+    }''',
+        '''async function defaultDaemonStatusReader(): Promise<unknown> {
+      const baseUrl = (process.env.ENGINEERING_CONTROL_DAEMON_URL ?? "http://127.0.0.1:3000").replace(/\\\/$/u, "");
+      return (await fetch(`${baseUrl}/v1/status`, { signal: AbortSignal.timeout(2_000) })).json();
+    }'''
+    )
+
+    p = root / "apps/daemon/src/control.ts"
+    text = p.read_text()
+    marker = "const productionSelfDeploymentOperations: SelfDeploymentOperations = {"
+    if text.count(marker) != 1:
+        raise SystemExit("control.ts self-deployment marker drift")
+    helper = '''function productionDaemonBaseUrl(): string {
+      return (process.env.ENGINEERING_CONTROL_DAEMON_URL ?? "http://127.0.0.1:3000").replace(/\\\/$/u, "");
+    }
+
+    '''
+    text = text.replace(marker, helper + marker)
+    if text.count('fetch("http://127.0.0.1:3000/readyz"') != 1:
+        raise SystemExit("control.ts readiness URL drift")
+    if text.count('fetch("http://127.0.0.1:3000/v1/status"') != 1:
+        raise SystemExit("control.ts status URL drift")
+    text = text.replace('fetch("http://127.0.0.1:3000/readyz"', 'fetch(`${productionDaemonBaseUrl()}/readyz`')
+    text = text.replace('fetch("http://127.0.0.1:3000/v1/status"', 'fetch(`${productionDaemonBaseUrl()}/v1/status`')
+    p.write_text(text)
+
+    p = root / "scripts/ec-bootstrap-reconcile.mjs"
+    text = p.read_text()
+    marker = 'export const NODE_VERSION = "24.19.0";'
+    if text.count(marker) != 1:
+        raise SystemExit("bootstrap node marker drift")
+    text = text.replace(marker, 'const DAEMON_BASE_URL = (process.env.ENGINEERING_CONTROL_DAEMON_URL ?? "http://127.0.0.1:3000").replace(/\\\/$/u, "");\n' + marker)
+    for old, new in [
+        ('["daemon", "http://127.0.0.1:3000/readyz"]', '["daemon", `${DAEMON_BASE_URL}/readyz`]'),
+        ('fetch("http://127.0.0.1:3000/healthz"', 'fetch(`${DAEMON_BASE_URL}/healthz`'),
+        ('fetch("http://127.0.0.1:3000/v1/status"', 'fetch(`${DAEMON_BASE_URL}/v1/status`'),
+    ]:
+        if old not in text:
+            raise SystemExit(f"bootstrap URL drift: {old}")
+        text = text.replace(old, new)
+    p.write_text(text)
+
+    replace(
+        "scripts/fallout-operator.mjs",
+        '["litellm", "http://127.0.0.1:4000/health"]',
+        '["litellm", "http://127.0.0.1:4000/health/readiness"]'
+    )
+
+    p = root / "deploy/scripts/install-fallout-v2"
+    text = p.read_text()
+    marker = "install_dropin engineering-control-inspector-tunnel.service 192M 256M\n"
+    if text.count(marker) != 1:
+        raise SystemExit("fallout installer drop-in marker drift")
+    addition = marker + '''for service in engineering-control-daemon.service engineering-control-mcp.service engineering-control-bootstrap-reconcile.service; do
+      echo "Environment=ENGINEERING_CONTROL_DAEMON_URL=http://127.0.0.1:3001" >> "${UNIT_DIR}/${service}.d/90-fallout-v2.conf"
+    done
+    '''
+    text = text.replace(marker, addition)
+    p.write_text(text)
+
+    p = root / "docs/deployment/FALLOUT_SINGLE_HOST.md"
+    text = p.read_text()
+    marker = "Cold-standby preparation therefore cannot silently become authority.\n"
+    if text.count(marker) != 1:
+        raise SystemExit("deployment doc activation marker drift")
+    note = marker + '''\nOn the concrete Phase 9 host, PersonalOS already owns loopback port 3000. The v2
+    installer therefore sets `ENGINEERING_CONTROL_DAEMON_URL=http://127.0.0.1:3001`
+    for the daemon, MCP operator surface, and bootstrap reconciler. Other hosts retain
+    the historical port-3000 default. LiteLLM qualification uses
+    `/health/readiness`; the authenticated `/health` endpoint is not the readiness
+    contract for the database-free SWITCH deployment.\n'''
+    text = text.replace(marker, note)
+    p.write_text(text)
+    PY
+
+    chown charles:charles /tmp/phase9-patch.py
+    as_charles python3 /tmp/phase9-patch.py
+    as_charles git -C "$REPO" diff --check
+    as_charles "$PNPM" --dir "$REPO" typecheck
+    as_charles bash -lc 'cd "$HOME/Projects/engineering-control"; tests=(scripts/fallout-operator.test.mjs apps/daemon/src/daemon.test.ts); for f in apps/daemon/src/control.test.ts apps/mcp/src/operator.test.ts; do [ -f "$f" ] && tests+=("$f"); done; "$HOME/.local/share/mise/installs/pnpm/11.23.0/pnpm" exec vitest run "${tests[@]}" --reporter=dot'
+    as_charles bash -n "$REPO/deploy/scripts/install-fallout-v2"
+
+    as_charles git -C "$REPO" add       apps/daemon/src/main.ts       apps/daemon/src/control.ts       apps/mcp/src/operator.ts       scripts/ec-bootstrap-reconcile.mjs       scripts/fallout-operator.mjs       deploy/scripts/install-fallout-v2       docs/deployment/FALLOUT_SINGLE_HOST.md
+    as_charles bash -lc 'cd "$HOME/Projects/engineering-control" && "$HOME/.local/share/mise/installs/pnpm/11.23.0/pnpm" requirements:review'
+    as_charles git -C "$REPO" config user.name "Charles Chevrier"
+    as_charles git -C "$REPO" config user.email "chevlpcmp-lab@users.noreply.github.com"
+    as_charles git -C "$REPO" commit -m "fix(phase9): support colocated FALLOUT runtime"
+    COMMIT="$(as_charles git -C "$REPO" rev-parse HEAD)"
+    as_charles git -C "$REPO" push "$HOME/.local/share/forgejo/repositories/charles/engineering-control.git" HEAD:refs/heads/main
+
+    as_charles "$PNPM" --dir "$REPO" build
+    test "$(cat "$REPO/dist/.ec-build-source")" = "$COMMIT"
+    REL="$HOME/.local/lib/engineering-control-inspector/releases/${COMMIT:0:12}-phase9"
+    rm -rf "$REL"
+    install -d -o charles -g charles "$REL"
+    cp -a "$REPO/dist" "$REPO/package.json" "$REL/"
+    ln -s "$REPO/node_modules" "$REL/node_modules"
+    chown -R charles:charles "$REL"
+    ln -sfn "$REL" "$HOME/.local/lib/engineering-control-inspector/current"
+    chown -h charles:charles "$HOME/.local/lib/engineering-control-inspector/current"
+
+    as_charles "$REPO/deploy/scripts/install-fallout-v2"
+    test -f "$HOME/.config/engineering-control/phase9-cutover-authorized"
+    as_charles "$REPO/deploy/scripts/activate-fallout-v2"
+
+    for _ in $(seq 1 90); do
+      as_charles systemctl --user is-active --quiet engineering-control-daemon.service &&
+      curl -fsS --max-time 2 http://127.0.0.1:3001/readyz >/dev/null 2>&1 &&
+      curl -fsS --max-time 2 http://127.0.0.1:8788/readyz >/dev/null 2>&1 &&
+      curl -fsS --max-time 2 http://127.0.0.1:8789/readyz >/dev/null 2>&1 &&
+      break
+      sleep 1
+    done
+    as_charles systemctl --user is-active --quiet engineering-control-daemon.service
+    curl -fsS http://127.0.0.1:3001/readyz >/dev/null
+    curl -fsS http://127.0.0.1:4000/health/readiness >/dev/null
+    as_charles bash -lc 'cd "$HOME/Projects/engineering-control" && node scripts/fallout-operator.mjs health --contract docs/deployment/fallout-single-host-v2.json'
+    mkdir -p "$HOME/.local/share/engineering-control/phase9-status"
+    printf 'commit=%s\nresult=success\n' "$COMMIT" > "$HOME/.local/share/engineering-control/phase9-status/runtime-hotfix.txt"
+    chown charles:charles "$HOME/.local/share/engineering-control/phase9-status/runtime-hotfix.txt"
