@@ -36,7 +36,7 @@ spec:
         homelab.charles/pool: media
       containers:
         - name: jellyfin
-          image: docker.io/jellyfin/jellyfin:latest
+          image: docker.io/jellyfin/jellyfin:10.11.11@sha256:aefb67e6a7ff1debdd154a78a7bbb780fd0c873d8639210a7f6a2016ad2b35db
           env:
             - { name: TZ, value: America/Toronto }
             - { name: JELLYFIN_PublishedServerUrl, value: "http://10.0.0.230:8096" }

@@ -28,7 +28,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: homarr
-          image: ghcr.io/homarr-labs/homarr:latest
+          image: ghcr.io/homarr-labs/homarr@sha256:025471efe0735b6bb89953ea4e141c984a171c1781bc8ca404163d3c26d0e26d
           env:
             - { name: TZ, value: America/Toronto }
             - name: SECRET_ENCRYPTION_KEY

@@ -321,7 +321,7 @@ spec:
             limits: { cpu: "1", memory: 1Gi }
 
         - name: bazarr
-          image: lscr.io/linuxserver/bazarr:latest
+          image: lscr.io/linuxserver/bazarr:v1.6.2-ls366@sha256:8b30e81c4aec2991f469e78fae8afaa89ecc9b21a80e3897f50427216b55470c
           env: *lsio-env
           ports: [{ name: bazarr, containerPort: 6767 }]
           startupProbe: { tcpSocket: { port: 6767 }, periodSeconds: 5, failureThreshold: 30 }
@@ -341,7 +341,7 @@ spec:
           resources: *arr-resources
 
         - name: seerr
-          image: ghcr.io/seerr-team/seerr:latest
+          image: ghcr.io/seerr-team/seerr:3.5.0@sha256:27602401178d54f1964442287b9f23f67a3fa2252645ee8065839ea1c3f69e45
           env:
             - { name: TZ, value: America/Toronto }
             - { name: PORT, value: "5055" }
@@ -410,7 +410,7 @@ spec:
             limits: { cpu: 100m, memory: 128Mi }
 
         - name: maintainerr
-          image: ghcr.io/maintainerr/maintainerr:latest
+          image: ghcr.io/maintainerr/maintainerr:3.29.0@sha256:7487d374290e59add65407ec295629e489f9057dbf18e2a9dff70d6201ffb6f9
           env:
             - { name: TZ, value: America/Toronto }
           ports: [{ name: maintainerr, containerPort: 6246 }]
