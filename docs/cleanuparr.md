@@ -100,7 +100,9 @@ language/sample substring rules.
 Dry-run used the real queues without resetting strikes or simulating elapsed time.
 Radarr/qBittorrent contained **Black Panther: Wakanda Forever**, in `metaDL` with
 zero connected seeds and zero progress. Trackers reported two complete peers, so
-the zero-seed metadata policy correctly protected it; no removal was proposed.
+the zero-seed metadata policy correctly protected it. It then acquired metadata
+and became `stalledDL`; a fresh dry-run processed it and recorded Stalled strike 1
+without deletion. The six-hour independent floor still applies.
 Sonarr had no queue entries, including no It's Always Sunny episode. Download
 Cleaner remained disabled. Live cleanup was enabled after inspecting these logs.
 Two-, six-, and twelve-hour removals were not claimed as observed during deployment.
