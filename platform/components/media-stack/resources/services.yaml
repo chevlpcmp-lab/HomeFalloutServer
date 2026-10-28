@@ -96,3 +96,14 @@ metadata:
 spec:
   selector: { app: media-stack }
   ports: [{ name: http, port: 8191, targetPort: 8191 }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cleanuparr
+  namespace: media
+  annotations: { metallb.io/loadBalancerIPs: "10.0.0.243" }
+spec:
+  type: LoadBalancer
+  selector: { app: media-stack }
+  ports: [{ name: http, port: 80, targetPort: 11011 }]
