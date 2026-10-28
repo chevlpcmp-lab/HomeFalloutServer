@@ -420,7 +420,25 @@ spec:
             - { name: config-maintainerr, mountPath: /opt/data }
           resources: *arr-resources
 
+        # API-only cleaner: no downloads/library mount, and no seeding cleanup.
+        - name: cleanuparr
+          image: ghcr.io/cleanuparr/cleanuparr:2.10.12@sha256:d0212e4c66bd0522e23c5e5da5d3006bd5ff0e0de1e3ecfcf892e039d55721e2
+          env:
+            - { name: TZ, value: America/Toronto }
+            - { name: PUID, value: "1000" }
+            - { name: PGID, value: "1000" }
+            - { name: PORT, value: "11011" }
+          ports: [{ name: cleanuparr, containerPort: 11011 }]
+          startupProbe: { tcpSocket: { port: 11011 }, periodSeconds: 5, failureThreshold: 60 }
+          readinessProbe: { tcpSocket: { port: 11011 }, periodSeconds: 15 }
+          volumeMounts:
+            - { name: config-cleanuparr, mountPath: /config }
+          resources:
+            requests: { cpu: 25m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+
       volumes:
+        - { name: config-cleanuparr, persistentVolumeClaim: { claimName: config-cleanuparr } }
         - { name: bootstrap-script, configMap: { name: media-stack-bootstrap } }
         - { name: media-data, persistentVolumeClaim: { claimName: media-data } }
         - { name: config-radarr, persistentVolumeClaim: { claimName: config-radarr } }
