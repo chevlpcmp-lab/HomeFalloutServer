@@ -50,8 +50,8 @@ wiring. To force and verify the same reconciliation at any time:
 ```
 
 Git recreates desired settings; backups recreate personal state. Jellyfin watch history, Homarr
-layout changes made after bootstrap, Seerr requests, application history, Immich's database, photos,
-and downloaded media still require the off-host backup set described in
+layout changes made after bootstrap, Seerr requests, application history, and downloaded media
+still require the off-host backup set described in
 [Operations](operations.md#recovery-order-after-a-total-rebuild).
 
 ## One shared admin account

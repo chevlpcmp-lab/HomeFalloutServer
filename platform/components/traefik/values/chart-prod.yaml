@@ -50,7 +50,7 @@ providers:
     enabled: true
 
 # The apps worker, matching Homarr. Traefik is small, and keeping it off the media
-# worker leaves that node's memory to Jellyfin and Immich.
+# worker leaves that node's memory to Jellyfin.
 nodeSelector:
   homelab.charles/pool: apps
 

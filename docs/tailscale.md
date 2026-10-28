@@ -6,7 +6,7 @@ can reach everything as if it were on the LAN, with no ports opened on the route
 
 | Route | What it exposes |
 | --- | --- |
-| `10.0.0.0/24` | The whole LAN: Proxmox, Argo CD (`10.0.0.200`), Homarr (`10.0.0.220`), Jellyfin, the arr apps, Immich, printers, everything |
+| `10.0.0.0/24` | The whole LAN: Proxmox, Argo CD (`10.0.0.200`), Homarr (`10.0.0.220`), Jellyfin, the arr apps, printers, everything |
 | `10.42.0.0/16` | Cluster pod network (debugging) |
 | `10.43.0.0/16` | Cluster Services by ClusterIP (debugging) |
 

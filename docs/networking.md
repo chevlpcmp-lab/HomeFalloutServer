@@ -45,9 +45,8 @@ no DNS setting on any page, so LAN-wide DNS cannot be pushed from it; see
 | `10.0.0.237` | `80` | Maintainerr `6246` | `media` | VPN pod |
 | `10.0.0.238` | `80` | Mylar `8090` | `media` | VPN pod |
 | `10.0.0.239` | `25600` | Komga `25600` | `media` | Direct |
-| `10.0.0.240` | `80` | Immich `2283` | `photos` | Direct |
 
-FlareSolverr, Immich Postgres, Valkey, and machine learning are ClusterIP-only. They are reachable
+FlareSolverr is ClusterIP-only. It is reachable
 by other cluster workloads, not directly from the LAN.
 
 ## How MetalLB L2 works here
@@ -109,7 +108,6 @@ Kubernetes workloads use service DNS names such as:
 ```text
 radarr.media.svc.cluster.local
 homarr.media.svc.cluster.local
-immich-postgres.photos.svc.cluster.local
 ```
 
 LAN clients currently use fixed IP addresses. Optional router/Pi-hole/AdGuard records can provide

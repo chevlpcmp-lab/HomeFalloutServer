@@ -8,7 +8,7 @@ containers within each application. The definitive configuration remains under
 
 | Component | Namespace | Source | Wave | Responsibility |
 | --- | --- | --- | ---: | --- |
-| `namespaces` | `argocd` | Local resources | 1 | Creates `networking`, `media`, `photos`, and `secrets` |
+| `namespaces` | `argocd` | Local resources | 1 | Creates `networking`, `media`, and `secrets` |
 | `metallb` | `networking` | Helm `0.15.3` + resources | 20/21 | Advertises stable LAN LoadBalancer addresses using L2 |
 | `argocd` | `argocd` | Local resources | 23 | Adds a stable `10.0.0.200` LAN Service without patching upstream manifests |
 | `traefik` | `networking` | Helm `41.2.0` | 26 | Ingress controller for every `*.home.lan` hostname |
@@ -18,7 +18,6 @@ containers within each application. The definitive configuration remains under
 | `media-stack` | `media` | Local resources | 81 | Runs the VPN-sharing automation pod and its services |
 | `homarr` | `media` | Local resources | 83 | Runs the dashboard independently on the apps worker |
 | `jellyfin` | `media` | Local resources | 85 | Streams the media library directly over the LAN |
-| `immich` | `photos` | Local resources | 87 | Runs photo storage, API, database, cache, and ML |
 | `komga` | `media` | Local resources | 89 | Serves the comic library directly over the LAN |
 | `ingress` | `media` | Local resources | 91 | Hostname rules for every LAN service, across four namespaces |
 
@@ -26,7 +25,7 @@ The `tailscale` resources-only component runs at wave 25 as a subnet router in `
 [Tailscale remote access](tailscale.md).
 
 The `infrastructure` AppProject can target all namespaces and cluster resources. The
-`applications` AppProject is restricted to `media` and `photos`, with Namespace as its only
+`applications` AppProject is restricted to `media`, with Namespace as its only
 cluster-scoped allow-list entry.
 
 ## Media stack
@@ -153,22 +152,6 @@ Sign in with the `apps-admin` username as an e-mail address (`<username>@homefal
 the shared password. The `Comics` library scans hourly and on startup; phone and tablet apps
 (Mihon, Panels, Chunky) connect through OPDS at `http://10.0.0.239:25600/opds/v1.2`.
 
-## Immich
-
-Immich runs as four cooperating workloads in `photos`, all pinned to the media worker because its
-database PVC and bulk photo PV are node-local.
-
-| Workload | Exposure | State | Resource request / limit | Role |
-| --- | --- | --- | --- | --- |
-| `immich-server` | LAN `10.0.0.240:80` | Shared photo PV | `200m/512Mi` · `2 CPU/2Gi` | API, web UI, jobs, uploads |
-| `immich-postgres` | Cluster `5432` | 8 Gi retained PVC | `200m/512Mi` · `2 CPU/1536Mi` | Authoritative metadata database |
-| `immich-valkey` | Cluster `6379` | Disposable | `50m/64Mi` · `500m/512Mi` | Queue/cache data |
-| `immich-machine-learning` | Cluster `3003` | 2 Gi model cache PVC | `200m/1Gi` · `3 CPU/3Gi` | Face recognition and smart search |
-
-The `immich-database` SealedSecret supplies the server and Postgres with matching database values.
-Photo originals live under `/mnt/data/photos`; the database must be backed up separately because
-the files alone do not reconstruct albums, users, or metadata.
-
 ## Home Assistant
 
 Home Assistant is the household remote: one web app that drives the Samsung TV, the Hue bridge, and
@@ -223,7 +206,7 @@ Filters DNS for the whole house and answers `*.home.lan` with Traefik's address,
 the hostnames resolve. One LoadBalancer at `10.0.0.202` carries DNS on 53 (TCP and UDP) and the web
 UI on 3000; config lives on a retained node-local PVC pinned to the apps worker.
 
-First-run setup is manual, matching the boundary Homarr and Immich already draw. **The wizard must
+First-run setup is manual. **The wizard must
 be told to use port 3000 for the admin interface**, not its default of 80, or the readiness probe
 never passes.
 
@@ -236,7 +219,7 @@ taking first.
 One component holding the Ingress objects for every LAN-facing service, rather than scattering them
 across the components they route to — the useful thing about a routing table is reading all of it at
 once. An Ingress must share a namespace with its Service, so it is one object per namespace across
-`media`, `photos`, `argocd`, and `networking`. It syncs last, because every rule names a Service the
+`media`, `argocd`, and `networking`. It syncs last, because every rule names a Service the
 components above create.
 
 ### Tailscale

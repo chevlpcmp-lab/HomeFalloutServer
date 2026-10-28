@@ -56,7 +56,6 @@ data:
         "maintainerr": "http://10.0.0.237",
         "mylar":       "http://10.0.0.238",
         "komga":       "http://10.0.0.239:25600",
-        "immich":      "http://10.0.0.240",
         "remote":      "http://10.0.0.241:8123",
         "house":       "http://10.0.0.242",
     }
@@ -1331,7 +1330,6 @@ data:
             "Maintainerr": (f"{ICONS}/png/maintainerr.png", LAN["maintainerr"], "Library cleanup"),
             "Mylar":       (f"{ICONS}/png/mylar.png",       LAN["mylar"],       "Comic requests and automation"),
             "Komga":       (f"{ICONS}/svg/komga.svg",       LAN["komga"],       "Comic reader"),
-            "Immich":      (f"{ICONS}/svg/immich.svg",      LAN["immich"],      "Photos"),
             "Remote":      (f"{ICONS}/svg/home-assistant.svg", LAN["remote"], "TV and lights remote"),
             # Overseer serves its own mark, so the tile has no third-party icon.
             "Overseer":    (f"{LAN['house']}/static/icon.svg", LAN["house"], "The living room, per person"),

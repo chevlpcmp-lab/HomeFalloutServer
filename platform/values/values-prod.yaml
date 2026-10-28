@@ -24,8 +24,8 @@ projects:
       - group: "*"
         kind: "*"
   applications:
-    description: Home media and photo applications.
-    destinations: [media, photos]
+    description: Home media applications.
+    destinations: [media]
     clusterResourceWhitelist:
       - group: ""
         kind: Namespace
@@ -121,14 +121,6 @@ components:
     resources:
       enabled: true
 
-  - name: immich
-    tier: apps
-    waveOffset: 6
-    namespace: photos
-    project: applications
-    resources:
-      enabled: true
-
   - name: komga
     tier: apps
     waveOffset: 8
@@ -163,7 +155,7 @@ components:
 
   # Hostnames for everything, synced last because each rule names a Service that the
   # components above create. Uses the infrastructure project: its rules span the
-  # media, photos, argocd, and networking namespaces, which the applications project
+  # media, argocd, and networking namespaces, which the applications project
   # is not allowed to touch.
   - name: ingress
     tier: apps

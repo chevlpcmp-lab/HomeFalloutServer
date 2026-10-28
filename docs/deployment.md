@@ -57,7 +57,6 @@ Expected local-only files include:
 ```text
 provisioning/terraform/terraform.tfvars
 platform/secrets/media-secrets.yaml
-platform/secrets/immich-secrets.yaml
 platform/secrets/argocd-repository.yaml
 platform/secrets/tailscale-secrets.yaml
 ```
@@ -157,7 +156,6 @@ Inspect the core workloads:
 .\scripts\k.ps1 rollout status -n media deploy/media-stack --timeout=10m
 .\scripts\k.ps1 rollout status -n media deploy/homarr --timeout=5m
 .\scripts\k.ps1 rollout status -n media deploy/jellyfin --timeout=5m
-.\scripts\k.ps1 rollout status -n photos deploy/immich-server --timeout=10m
 ```
 
 Finally, prove qBittorrent shares Gluetun's VPN address using the commands in
@@ -170,7 +168,6 @@ Finally, prove qBittorrent shares Gluetun's VPN address using the commands in
 3. Put both API keys in the gitignored media secret source, reseal, commit, and restart the media
    stack bootstrap.
 4. Confirm Seerr and Maintainerr show their bootstrap-managed connections and retention rules.
-5. Create the first Immich administrator and test an upload.
 
 See [First-run application wiring](configuration.md) for exact paths and commands.
 
@@ -224,5 +221,5 @@ the same order as `deploy.ps1`. Use it for diagnosis, not as a shortcut around a
 
 Terraform and Git can reconstruct compute, Kubernetes objects, and the bootstrap-owned media
 application settings. They cannot reconstruct user data, mutable databases/history, the Sealed
-Secrets private key, Homarr/Immich initial accounts, or media and photos. A real rebuild therefore
+Secrets private key, Homarr initial accounts, or media. A real rebuild therefore
 still needs the external backup set described in [Operations](operations.md).

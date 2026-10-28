@@ -7,10 +7,10 @@ application configuration, and large user data so their capacity and backup poli
 | --- | ---: | --- | --- |
 | `local` | 20 GB | control `/` | Ubuntu, k3s control plane, and etcd |
 | `local` | 20 GB | apps `/` | Ubuntu, images, and Homarr config PVC |
-| `local` | 48 GB | media `/` | Ubuntu, images, and media/Immich config and database PVCs |
-| `local-lvm` | 600 GB | media `/mnt/data` | Downloads, movies, TV, and Immich originals/uploads |
+| `local` | 48 GB | media `/` | Ubuntu, images, and media config and database PVCs |
+| `local-lvm` | 600 GB | media `/mnt/data` | Downloads, movies, and TV |
 
-The remaining unallocated `local-lvm` capacity is deliberately reserved for future media/photo
+The remaining unallocated `local-lvm` capacity is deliberately reserved for future media
 growth. It is not consumed by application configuration.
 
 ```mermaid
@@ -27,7 +27,6 @@ flowchart TB
 
     Data --> Mount["/mnt/data"]
     Mount --> Media["media<br/>downloads + movies + TV"]
-    Mount --> Photos["photos<br/>Immich originals + uploads"]
 ```
 
 ## Persistent application state
@@ -43,7 +42,6 @@ This includes:
 - Homarr's `/appdata` volume.
 - Jellyfin configuration and cache.
 - Komga configuration and database.
-- Immich Postgres data and machine-learning cache.
 
 | Workload | PVC(s) | Storage class | Scheduled node | Backup value |
 | --- | --- | --- | --- | --- |
@@ -51,12 +49,9 @@ This includes:
 | Homarr | 1 Gi config | `config-local-retain` | `k3s-apps-01` | Medium: dashboard state |
 | Jellyfin | 2 Gi config + 3 Gi cache | `config-local-retain` | `k3s-media-01` | Config high; cache disposable |
 | Komga | 1 Gi config | `config-local-retain` | `k3s-media-01` | Medium: users, read progress, metadata edits |
-| Immich | 8 Gi Postgres + 2 Gi ML cache | `config-local-retain` | `k3s-media-01` | Postgres critical; ML cache disposable |
 | Media library | Static 500 Gi metadata claim | `media-local` | `k3s-media-01` | Depends on reacquisition cost |
-| Immich library | Static 500 Gi metadata claim | `photos-local` | `k3s-media-01` | Critical and irreplaceable |
 
-Gluetun and FlareSolverr are intentionally stateless. Immich Valkey/Redis is only a disposable
-cache; authoritative Immich state is in Postgres and the photo library. Kubernetes Secret values
+Gluetun and FlareSolverr are intentionally stateless. Kubernetes Secret values
 and the Sealed Secrets controller state live in etcd on the OS disk, while the sealing-key export
 must also be copied to encrypted storage outside this server.
 
@@ -64,7 +59,7 @@ The local-path provisioner does not enforce per-PVC quotas. Monitor both worker 
 especially the 48 GB media worker disk. A `Retain` reclaim policy protects against automatic
 deletion; it is not a backup.
 
-## Bulk media and photos
+## Bulk media
 
 Ansible locates the 600 GB disk by its `HOMEFALLOUT_DATA` serial, formats it only when blank, and
 mounts it at `/mnt/data`:
@@ -81,7 +76,6 @@ mounts it at `/mnt/data`:
       movies/
       tv/
       comics/
-  photos/
 ```
 
 Use `/data/downloads` and `/data/library` in qBittorrent and the Arr applications. Downloads and
@@ -91,7 +85,7 @@ copying. Jellyfin sees the library read-only at `/media/library`; Komga sees it 
 watching that folder, so it must not see Radarr/Sonarr payloads) and Mylar's GetComics direct
 downloads stage in `downloads/ddl`.
 
-The media and photos PV capacities are binding metadata rather than separate quotas: both share
+The media PV capacities are binding metadata rather than separate quotas: both share
 the same 600 GB filesystem. Keep the Proxmox thin pool below roughly 80-85% actual usage.
 
 ## Data lifecycle
@@ -110,7 +104,6 @@ flowchart LR
     Jellyfin["Jellyfin · read-only"] --> Movies
     Jellyfin --> TV
     Komga["Komga · read-only"] --> Comics
-    Immich["Immich"] --> Photos["photos"]
 ```
 
 Downloads and library paths share one filesystem specifically so Radarr and Sonarr can hardlink
@@ -119,14 +112,12 @@ entry continue to reference the same underlying blocks until both links are remo
 
 ## Backup classes
 
-- **Critical:** Immich originals, Immich Postgres, Sealed Secrets controller key, and Terraform
+- **Critical:** Sealed Secrets controller key and Terraform
   local inputs. Keep versioned copies outside the Proxmox host.
 - **Important:** application config PVCs, Jellyfin metadata, Homarr state, and selected media.
-- **Disposable:** download staging, Jellyfin cache, Immich ML cache, Valkey, and container images.
+- **Disposable:** download staging, Jellyfin cache and container images.
 
-A consistent Immich restore needs both a database dump and the matching photo tree. Copying only
-`/mnt/data/photos` does not preserve users, albums, faces, or database metadata. Quiesce applications
-or use application-aware database dumps before copying live state.
+Quiesce applications or use application-aware database dumps before copying live state.
 
 ## Why Longhorn is not installed
 
@@ -140,12 +131,12 @@ loss.
 
 ## Recommended upgrade order
 
-1. Add a conventional 8-16 TB SATA CMR hard drive for media and photos. Keep databases and
+1. Add a conventional 8-16 TB SATA CMR hard drive for media. Keep databases and
    configuration on NVMe.
-2. Upgrade to 32 GB RAM so Immich ML and Jellyfin transcoding cannot starve Proxmox.
-3. Add an external backup target for worker PVC data, Immich originals, and the sealing key.
+2. Upgrade to 32 GB RAM so Jellyfin transcoding cannot starve Proxmox.
+3. Add an external backup target for worker PVC data and the sealing key.
 
-Until an HDD is added, expect roughly 450-520 GB of practical media/photo capacity after download
+Until an HDD is added, expect roughly 450-520 GB of practical media capacity after download
 staging and safety headroom. Configure qBittorrent to remove completed downloads after import and
 use Maintainerr to cap library growth.
 

@@ -120,10 +120,10 @@ if (-not $SkipGitOps) {
         throw "Ansible did not produce $kubeconfig"
     }
     & (Join-Path $PSScriptRoot 'bootstrap.ps1') -Kubeconfig $kubeconfig
-    foreach ($namespace in @('media', 'photos', 'secrets')) {
+    foreach ($namespace in @('media', 'secrets')) {
         Wait-KubernetesResource -Kubeconfig $kubeconfig -Resource "namespace/$namespace" -TimeoutSeconds 300
     }
-    kubectl --kubeconfig $kubeconfig wait --for=jsonpath='{.status.phase}'=Active namespace/media namespace/photos namespace/secrets --timeout=5m
+    kubectl --kubeconfig $kubeconfig wait --for=jsonpath='{.status.phase}'=Active namespace/media namespace/secrets --timeout=5m
     if ($LASTEXITCODE -ne 0) { throw 'Application namespaces did not become active.' }
     Wait-KubernetesResource -Kubeconfig $kubeconfig -Resource 'crd/sealedsecrets.bitnami.com' -TimeoutSeconds 300
     kubectl --kubeconfig $kubeconfig wait --for=condition=Established crd/sealedsecrets.bitnami.com --timeout=5m
@@ -134,8 +134,7 @@ if (-not $SkipGitOps) {
     & (Join-Path $PSScriptRoot 'seal-secrets.ps1') -Kubeconfig $kubeconfig
     $sealedSecrets = @(
         (Join-Path $repoRoot 'platform\components\media-stack\resources\sealed-secret-gluetun-vpn.yaml'),
-        (Join-Path $repoRoot 'platform\components\homarr\resources\sealed-secret-homarr-secrets.yaml'),
-        (Join-Path $repoRoot 'platform\components\immich\resources\sealed-secret-immich-database.yaml')
+        (Join-Path $repoRoot 'platform\components\homarr\resources\sealed-secret-homarr-secrets.yaml')
     )
     foreach ($sealedSecret in $sealedSecrets) {
         kubectl --kubeconfig $kubeconfig apply -f $sealedSecret

@@ -74,8 +74,6 @@ Equivalent examples for standalone workloads:
 ```powershell
 .\scripts\k.ps1 logs -n media deploy/jellyfin --tail=200
 .\scripts\k.ps1 logs -n media deploy/homarr --tail=200
-.\scripts\k.ps1 logs -n photos deploy/immich-server --tail=200
-.\scripts\k.ps1 logs -n photos statefulset/immich-postgres --tail=200
 ```
 
 ## VPN safety check
@@ -98,7 +96,6 @@ after reconnects.
 .\scripts\k.ps1 rollout restart -n media deploy/media-stack
 .\scripts\k.ps1 rollout restart -n media deploy/homarr
 .\scripts\k.ps1 rollout restart -n media deploy/jellyfin
-.\scripts\k.ps1 rollout restart -n photos deploy/immich-server
 ```
 
 Restarting `media-stack` restarts every VPN-sharing application as one unit. Its retained PVCs and
@@ -132,8 +129,6 @@ At present, backups must be arranged outside this repository. A useful minimum s
 
 | Priority | Data | Why | Suggested method |
 | ---: | --- | --- | --- |
-| 1 | Immich originals and uploads | Irreplaceable personal data | Versioned copy to external disk/NAS/cloud |
-| 1 | Immich Postgres | Required to reconstruct users, albums, faces, and metadata | Scheduled `pg_dump` plus off-host copy |
 | 1 | Sealed Secrets controller key | Required to decrypt committed ciphertext after total cluster loss | Encrypted offline copy |
 | 2 | Application config PVCs | Saves setup, databases, API keys, and history | Filesystem-level backup while apps are quiesced |
 | 2 | Terraform state and gitignored inputs | Speeds exact infrastructure recovery | Encrypted off-host backup |
@@ -156,7 +151,7 @@ and periodically because the controller renews keys.
 
 - Review Renovate proposals; never auto-merge all application updates blindly.
 - Prefer explicit image versions over `latest`/`release` for reliable rollback.
-- Back up state before database, Immich, or k3s upgrades.
+- Back up state before database or k3s upgrades.
 - Change one layer at a time: Proxmox, then VM OS, then k3s/platform, then applications.
 - Read upstream release notes for schema migrations and breaking configuration changes.
 - Verify VPN egress and application integration after any media pod image change.
@@ -177,11 +172,10 @@ configuration; application data migrations may require the component's own recov
 ## Capacity and performance
 
 The 16 GB host is intentionally close to its useful ceiling. Watch for host swapping, guest OOM
-kills, and Immich ML/Jellyfin concurrency. Practical tuning order:
+kills and Jellyfin concurrency. Practical tuning order:
 
-1. Avoid running Immich bulk indexing while Jellyfin is CPU transcoding.
-2. Limit background jobs in the application UIs if the media worker experiences memory pressure.
-3. Add Intel iGPU passthrough for Jellyfin before buying CPU capacity, unless the
+1. Limit background jobs in the application UIs if the media worker experiences memory pressure.
+2. Add Intel iGPU passthrough for Jellyfin before buying CPU capacity, unless the
    [TV console](tv-console.md) is using the iGPU on the host; the two are mutually exclusive.
 4. Upgrade to 32 GB RAM before adding observability, more databases, or another large workload.
 5. Add an 8–16 TB CMR disk and external backup target before the NVMe fills.
@@ -202,7 +196,6 @@ kills, and Immich ML/Jellyfin concurrency. Practical tuning order:
 | qBittorrent UI rejects login | `qbittorrent-auth` sealed value and bootstrap logs | Secret / bootstrap |
 | Arr cannot import | Paths match `/data`, permissions are UID/GID 1000, free disk | Storage / app wiring |
 | Jellyfin library empty | `/media/library` mount and Radarr/Sonarr output paths | Storage |
-| Immich upload fails | server/Postgres logs, photos PVC, disk space | Immich / storage |
 | Homarr tiles not created | Homarr API key and bootstrap logs | First-run wiring |
 
 ## Recovery order after a total rebuild
@@ -213,8 +206,8 @@ kills, and Immich ML/Jellyfin concurrency. Practical tuning order:
 4. Restore the Sealed Secrets controller key before expecting committed ciphertext to decrypt.
 5. Bootstrap Argo CD and let the platform reconcile.
 6. Let the media bootstrap reconstruct its Git-owned application wiring; restore application config
-   volumes and Immich Postgres when their history and user state must survive.
-7. Restore the matching `/mnt/data/photos` and any protected media data.
+   volumes when their history and user state must survive.
+7. Restore protected media data.
 8. Start applications, verify storage bindings, then verify the VPN boundary.
 
 The exact restore tooling depends on the backup target eventually chosen. Git can recreate the

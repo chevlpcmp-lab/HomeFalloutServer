@@ -90,18 +90,6 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: photos
-  namespace: photos
-spec:
-  rules:
-    - host: immich.home.lan
-      http:
-        paths:
-          - { path: /, pathType: Prefix, backend: { service: { name: immich, port: { number: 80 } } } }
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
   name: argocd
   namespace: argocd
 spec:

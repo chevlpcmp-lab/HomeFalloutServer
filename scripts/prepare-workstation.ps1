@@ -163,7 +163,7 @@ nodes = {
     data_disk_gb = 600
     data_disk_datastore = "local-lvm"
     data_disk_serial = "HOMEFALLOUT_DATA"
-    description = "k3s media, Jellyfin, and Immich worker"
+    description = "k3s media and Jellyfin worker"
   }
 }
 "@
@@ -264,25 +264,6 @@ stringData:
 "@
     Set-Content -LiteralPath $tailscaleSecretPath -Value $tailscaleSecret -Encoding UTF8
     Write-Host "Created $tailscaleSecretPath (gitignored)."
-}
-
-$immichSecretPath = Join-Path $secretsDir 'immich-secrets.yaml'
-if (-not (Test-Path -LiteralPath $immichSecretPath)) {
-    $dbPassword = New-RandomHex 32
-    $immichSecret = @"
-apiVersion: v1
-kind: Secret
-metadata:
-  name: immich-database
-  namespace: photos
-type: Opaque
-stringData:
-  DB_USERNAME: "immich"
-  DB_PASSWORD: "$dbPassword"
-  DB_DATABASE_NAME: "immich"
-"@
-    Set-Content -LiteralPath $immichSecretPath -Value $immichSecret -Encoding UTF8
-    Write-Host "Created $immichSecretPath (gitignored)."
 }
 
 $distros = (wsl --list --quiet) -replace "`0", ''

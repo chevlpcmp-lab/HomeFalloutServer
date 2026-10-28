@@ -11,9 +11,4 @@ metadata:
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: photos
----
-apiVersion: v1
-kind: Namespace
-metadata:
   name: secrets

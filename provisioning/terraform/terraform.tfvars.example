@@ -50,6 +50,6 @@ nodes = {
     data_disk_gb = 600
     data_disk_datastore = "local-lvm"
     data_disk_serial = "HOMEFALLOUT_DATA"
-    description  = "k3s media, Jellyfin, and Immich worker"
+    description  = "k3s media and Jellyfin worker"
   }
 }

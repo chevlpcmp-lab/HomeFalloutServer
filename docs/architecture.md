@@ -59,12 +59,12 @@ flowchart TB
 | --- | --- | --- | --- | --- |
 | `k3s-cp-01` | server | `homelab.charles/pool=control` | `control-plane=true:NoSchedule` | k3s API, scheduler, controllers, etcd, cluster system pods |
 | `k3s-apps-01` | agent | `homelab.charles/pool=apps` | none | Homarr |
-| `k3s-media-01` | agent | `homelab.charles/pool=media` | none | media-stack, Jellyfin, Komga, Immich, databases, data-bound pods |
+| `k3s-media-01` | agent | `homelab.charles/pool=media` | none | media-stack, Jellyfin, Komga, databases, data-bound pods |
 
 All 28 logical CPUs are presented to VMs, which is acceptable CPU overcommit for bursty home
 workloads. VM memory totals 12 GB, leaving roughly 3 GB for Proxmox after normal host use. The media
-worker carries the largest allocation because Immich machine learning and Jellyfin transcoding are
-the heaviest workloads.
+worker carries the largest allocation because Jellyfin transcoding and the media stack are the
+heaviest workloads.
 
 ## Kubernetes control and data planes
 
@@ -87,7 +87,6 @@ flowchart TB
         MediaPod["VPN media-stack pod"]
         Jellyfin["Jellyfin"]
         Komga["Komga"]
-        Immich["Immich server + ML<br/>Postgres + Valkey"]
     end
 
     API --> Argo
@@ -97,12 +96,10 @@ flowchart TB
     Argo --> MediaPod
     Argo --> Jellyfin
     Argo --> Komga
-    Argo --> Immich
     Metal -.->|advertises LAN services| Homarr
     Metal -.->|advertises LAN services| MediaPod
     Metal -.->|advertises LAN services| Jellyfin
     Metal -.->|advertises LAN services| Komga
-    Metal -.->|advertises LAN services| Immich
 ```
 
 ## GitOps application model
@@ -122,7 +119,6 @@ flowchart LR
     Platform --> MS["media-stack · wave 81"]
     Platform --> H["Homarr · wave 83"]
     Platform --> J["Jellyfin · wave 85"]
-    Platform --> I["Immich · wave 87"]
     Platform --> K["Komga · wave 89"]
 ```
 
@@ -162,14 +158,12 @@ flowchart LR
     Komga --> Comics
     Homarr -.->|dashboard integrations| Prowlarr
     Homarr -.->|dashboard integrations| Jellyfin
-    Immich --> Postgres[("Postgres")]
-    Immich --> Photos[("Photo library")]
 ```
 
 The media `bootstrap` sidecar discovers generated application API keys from their persistent config
 files and idempotently asserts the Git-owned machine-to-machine connections. It also completes a
-blank Jellyfin installation from the sealed shared-admin credentials. Homarr and Immich retain
-their one-time interactive identity setup. See [First-run application wiring](configuration.md).
+blank Jellyfin installation from the sealed shared-admin credentials. Homarr retains
+its one-time interactive identity setup. See [First-run application wiring](configuration.md).
 
 ## VPN boundary and startup ordering
 
@@ -183,8 +177,8 @@ Mylar, and the bootstrap helper. A config change to any of those containers recr
 pod. This is a deliberate trade: a strong, inspectable VPN boundary in exchange for a larger
 restart unit.
 
-Homarr, Jellyfin, Komga, and Immich use separate pods and direct egress. Streaming, reading, or
-photo transfers should never depend on the VPN tunnel.
+Homarr, Jellyfin, and Komga use separate pods and direct egress. Streaming and reading should
+never depend on the VPN tunnel.
 
 ## State and failure domains
 
@@ -192,13 +186,13 @@ photo transfers should never depend on the VPN tunnel.
 | --- | --- | --- | --- |
 | Application container restart | Brief app outage | All PVC and bulk data | Kubernetes restarts it |
 | Worker VM reboot | Apps on that worker stop | VM disks and retained PVC data | k3s + Argo CD reschedule locally |
-| Media worker loss | Media, Jellyfin, Immich unavailable | Only if its virtual disks survive | VM/data-disk recovery and backups |
+| Media worker loss | Media, Jellyfin unavailable | Only if its virtual disks survive | VM/data-disk recovery and backups |
 | Control-plane VM loss | Kubernetes API and reconciliation stop | Existing worker processes may continue temporarily | Rebuild control plane and restore state |
 | Proxmox/NVMe loss | Entire lab unavailable | Nothing on-host is independent | External backups and IaC repository |
 
 Three VMs improve organization, resource control, and maintenance. They do not protect against the
 loss of `home`, its power supply, or its NVMe. This is why Longhorn replicas are not useful yet and
-why the sealing key, databases, config volumes, and irreplaceable photos need off-host backups.
+why the sealing key, databases and config volumes need off-host backups.
 
 ## Deliberate omissions
 
@@ -209,7 +203,7 @@ why the sealing key, databases, config volumes, and irreplaceable photos need of
 - **No GPU passthrough yet:** Jellyfin currently transcodes on CPU. Intel iGPU passthrough is a
   future optimization, and one the [TV console](tv-console.md) forecloses while it is in use: that
   session draws on the host with the same device an exclusive passthrough would claim.
-- **No on-cluster observability stack:** current RAM is better reserved for Immich and playback.
+- **No on-cluster observability stack:** current RAM is better reserved for media workloads and playback.
 
 These are current design decisions, not permanent limitations. Add complexity when the hardware
 and operational need justify it.

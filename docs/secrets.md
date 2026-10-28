@@ -27,7 +27,6 @@ flowchart LR
 | `apps-admin` | `media` | Shared admin login, enforced by the bootstrap across the media apps | `media-stack/resources/sealed-secret-apps-admin.yaml` |
 | `comicvine` | `media` | Mylar's ComicVine metadata key, asserted into `config.ini` by its init container | `media-stack/resources/sealed-secret-comicvine.yaml` |
 | `homarr-secrets` | `media` | Homarr + bootstrap | `homarr/resources/sealed-secret-homarr-secrets.yaml` |
-| `immich-database` | `photos` | Immich server + Postgres | `immich/resources/sealed-secret-immich-database.yaml` |
 | `tailscale-auth` | `networking` | Tailscale subnet router (staged, see docs/tailscale.md) | `tailscale/resources/sealed-secret-tailscale-auth.yaml` |
 
 Every application credential declared by this repository is delivered through a SealedSecret.
@@ -52,7 +51,6 @@ platform/components/media-stack/resources/sealed-secret-gluetun-vpn.yaml
 platform/components/media-stack/resources/sealed-secret-apps-admin.yaml
 platform/components/media-stack/resources/sealed-secret-comicvine.yaml
 platform/components/homarr/resources/sealed-secret-homarr-secrets.yaml
-platform/components/immich/resources/sealed-secret-immich-database.yaml
 platform/components/tailscale/resources/sealed-secret-tailscale-auth.yaml
 ```
 

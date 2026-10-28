@@ -14,7 +14,7 @@ flowchart LR
     subgraph K["☸️ k3s"]
         AG["🛡️ AdGuard Home<br/>10.0.0.202 · DNS + filtering"]
         TR["🚦 Traefik<br/>10.0.0.201 · ingress"]
-        Svc["Jellyfin · Immich · Homarr<br/>Komga · Argo CD · the arr stack"]
+        Svc["Jellyfin · Homarr<br/>Komga · Argo CD · the arr stack"]
     end
     Up(("Upstream DNS"))
 
@@ -41,7 +41,6 @@ DNS is broken.
 | `jellyfin.home.lan` | Jellyfin | `10.0.0.230:8096` |
 | `komga.home.lan` | Komga | `10.0.0.239:25600` |
 | `seerr.home.lan` | Seerr | `10.0.0.236` |
-| `immich.home.lan` | Immich | `10.0.0.240` |
 | `argocd.home.lan` | Argo CD | `10.0.0.200` |
 | `adguard.home.lan` | AdGuard Home | `10.0.0.202:3000` |
 | `radarr` `sonarr` `prowlarr` `bazarr` `mylar` `maintainerr` `qbittorrent` `.home.lan` | The automation tier | `10.0.0.231-238` |
@@ -66,7 +65,7 @@ Open `http://10.0.0.202:3000` and walk the wizard.
 Leave the DNS server on port 53. Pick whatever upstream you like — the defaults are fine.
 
 This is deliberately manual, matching the boundary the rest of the lab already draws: Homarr and
-Immich admin users are set up by hand too, and only machine-to-machine wiring is automated.
+Homarr admin users are set up by hand too, and only machine-to-machine wiring is automated.
 
 ### 2. The DNS rewrite that makes hostnames work
 
@@ -206,7 +205,7 @@ Once the rewrites exist, this tests the whole chain, taking the address from AdG
 hardcoding it — which is what a browser does:
 
 ```bash
-for h in home.lan jellyfin.home.lan immich.home.lan argocd.home.lan; do
+for h in home.lan jellyfin.home.lan argocd.home.lan; do
   ip=$(nslookup "$h" 10.0.0.202 | awk '/^Address/{a=$2} END{print a}')
   code=$(curl -s -o /dev/null -w "%{http_code}" --resolve "$h:80:$ip" "http://$h/")
   printf '%-24s %-12s HTTP %s

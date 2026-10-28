@@ -15,7 +15,7 @@ lvs
 
 The default configuration requests 20 GB, 20 GB, and 48 GB OS/config disks plus a sparse 4 GB
 template disk on directory-backed `local`. It requests a separate 600 GB thin-provisioned bulk-data
-disk on `local-lvm`; the rest of that thin pool remains reserved for future Immich/media growth.
+disk on `local-lvm`; the rest of that thin pool remains reserved for future /media growth.
 
 Your reported `local` storage has about 83 GB available. These directory-backed qcow2 disks are
 sparse, but together can grow to 68 GB plus the downloaded cloud image. Monitor the Proxmox root
