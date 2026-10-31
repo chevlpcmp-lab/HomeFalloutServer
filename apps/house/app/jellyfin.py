@@ -136,7 +136,7 @@ class Jellyfin:
         self.device_name = device_name
         self._client = httpx.AsyncClient(
             base_url=url.rstrip("/"),
-            headers={"X-Emby-Token": api_key},
+            headers={"Authorization": f'MediaBrowser Token="{api_key}"'},
             timeout=timeout,
             transport=transport,
         )

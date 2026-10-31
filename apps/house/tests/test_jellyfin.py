@@ -159,6 +159,13 @@ class JellyfinClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("secret", json.dumps(state))
         self.assertNotIn("session", json.dumps(state))
 
+    async def test_uses_current_jellyfin_authorization_header(self) -> None:
+        await self.client.state()
+        request = self.requests[0]
+        self.assertEqual(request.headers["Authorization"], 'MediaBrowser Token="secret"')
+        self.assertNotIn("X-Emby-Token", request.headers)
+        self.assertNotIn("api_key", request.url.params)
+
     async def test_search_returns_only_safe_movie_fields(self) -> None:
         movies = await self.client.search_movies("example")
         self.assertEqual(movies, [{
