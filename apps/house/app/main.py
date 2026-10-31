@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 
 from . import config
 from .db import SESSION_TTL, Store, User
+from .downloads import Downloads
 from .ha import HAError, HomeAssistant
 from .hyperion import Hyperion, HyperionError
 from .jellyfin import (
@@ -118,7 +119,12 @@ async def lifespan(app: FastAPI):
     app.state.jellyfin = Jellyfin(
         config.JELLYFIN_URL, config.JELLYFIN_API_KEY, config.JELLYFIN_DEVICE_NAME
     )
+    app.state.downloads = Downloads(
+        config.RADARR_URL, config.RADARR_API_KEY, config.SONARR_URL, config.SONARR_API_KEY,
+        config.QBIT_URL, config.QBIT_USERNAME, config.QBIT_PASSWORD,
+    )
     yield
+    await app.state.downloads.aclose()
     await app.state.ha.aclose()
     await app.state.hyperion.aclose()
     await app.state.jellyfin.aclose()
@@ -485,6 +491,10 @@ def _jellyfin(request: Request) -> Jellyfin:
     return request.app.state.jellyfin
 
 
+def _downloads(request: Request) -> Downloads:
+    return request.app.state.downloads
+
+
 @app.exception_handler(HAError)
 async def _ha_error(request: Request, exc: HAError):
     return JSONResponse({"detail": str(exc)}, status_code=502)
@@ -622,6 +632,20 @@ class SeekChoice(BaseModel):
     seconds: float = Field(ge=0)
 
 
+async def _library_response(request: Request, items: list[dict]) -> dict:
+    snapshot = await _downloads(request).snapshot()
+    health = snapshot["ok"]
+    warning = ""
+    if not health.get("movies") or not health.get("series"):
+        warning = "Some tracked titles are temporarily unavailable. Ready-to-watch titles still work."
+    elif not health.get("rq") or not health.get("sq"):
+        warning = "Download status is temporarily unavailable. Check again in a moment."
+    elif not health.get("qbit"):
+        warning = "Live download speed is unavailable. Progress comes from your download managers."
+    return {"items": items, "movies": [item for item in items if item["type"] == "Movie"],
+            "availability_warning": warning}
+
+
 @app.post("/api/jellyfin/search")
 async def jellyfin_search(
     request: Request,
@@ -631,51 +655,52 @@ async def jellyfin_search(
     query = search.query.strip()
     if len(query) < 2:
         raise HTTPException(400, "Enter at least two characters")
-    items = await _jellyfin(request).search_media(query)
+    items = await _downloads(request).search_media(query, _jellyfin(request))
     # Keep `movies` for older clients while new clients can render both types.
-    return {"items": items, "movies": [item for item in items if item["type"] == "Movie"]}
+    return await _library_response(request, items)
 
 
 @app.get("/api/jellyfin/recent")
 async def jellyfin_recent(request: Request, user: User = Depends(api_user)):
-    items = await _jellyfin(request).recent_media()
-    return {"items": items, "movies": [item for item in items if item["type"] == "Movie"]}
+    items = await _downloads(request).recent_media(_jellyfin(request))
+    return await _library_response(request, items)
 
 
 @app.get("/api/jellyfin/continue")
 async def jellyfin_continue(request: Request, user: User = Depends(api_user)):
-    return {"items": await _jellyfin(request).continue_watching()}
+    return {"items": await _downloads(request).enrich(await _jellyfin(request).continue_watching())}
 
 
 @app.get("/api/jellyfin/next-up")
 async def jellyfin_next_up(request: Request, user: User = Depends(api_user)):
-    return {"items": await _jellyfin(request).next_up()}
+    return {"items": await _downloads(request).enrich(await _jellyfin(request).next_up())}
 
 
 @app.get("/api/jellyfin/next-episode")
 async def jellyfin_next_episode(request: Request, user: User = Depends(api_user)):
-    return {"item": await _jellyfin(request).next_episode()}
+    item = await _jellyfin(request).next_episode()
+    return {"item": (await _downloads(request).enrich([item]))[0] if item else None}
 
 
 @app.get("/api/jellyfin/series/{series_id}/seasons")
 async def jellyfin_seasons(
     request: Request,
-    series_id: str = ApiPath(pattern=r"^[0-9A-Fa-f]{32}$"),
+    series_id: str = ApiPath(pattern=r"^(?:[0-9A-Fa-f]{32}|sonarr-[1-9][0-9]*)$"),
     user: User = Depends(api_user),
 ):
-    return {"seasons": await _jellyfin(request).seasons(series_id)}
+    return {"seasons": await _downloads(request).seasons(series_id, _jellyfin(request))}
 
 
 @app.get("/api/jellyfin/series/{series_id}/episodes")
 async def jellyfin_episodes(
     request: Request,
-    series_id: str = ApiPath(pattern=r"^[0-9A-Fa-f]{32}$"),
+    series_id: str = ApiPath(pattern=r"^(?:[0-9A-Fa-f]{32}|sonarr-[1-9][0-9]*)$"),
     season_id: str = "",
     user: User = Depends(api_user),
 ):
-    if not season_id or not re.fullmatch(r"[0-9A-Fa-f]{32}", season_id):
+    if not season_id or not re.fullmatch(r"(?:[0-9A-Fa-f]{32}|sonarr-[1-9][0-9]*-season-[0-9]+)", season_id):
         raise HTTPException(400, "Choose a valid season")
-    return {"episodes": await _jellyfin(request).episodes(series_id, season_id)}
+    return {"episodes": await _downloads(request).episodes(series_id, season_id, _jellyfin(request))}
 
 
 @app.get("/api/jellyfin/movies/{item_id}/artwork")

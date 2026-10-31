@@ -58,12 +58,16 @@ spec:
             # whitelisted navigation and playback commands.
             - { name: JELLYFIN_URL, value: "http://jellyfin.media.svc.cluster.local:8096" }
             - { name: JELLYFIN_DEVICE_NAME, value: "home" }
+            - { name: RADARR_URL, value: "http://radarr.media.svc.cluster.local" }
+            - { name: SONARR_URL, value: "http://sonarr.media.svc.cluster.local" }
+            - { name: QBIT_URL, value: "http://qbittorrent.media.svc.cluster.local" }
             - name: JELLYFIN_API_KEY
               valueFrom:
                 secretKeyRef: { name: homarr-secrets, key: JELLYFIN_API_KEY }
           envFrom:
             # HA_URL, HA_TOKEN, SESSION_SECRET - see docs/secrets.md.
             - secretRef: { name: house-secrets }
+            - secretRef: { name: house-download-secrets }
           ports:
             - { name: http, containerPort: 8000 }
           startupProbe:

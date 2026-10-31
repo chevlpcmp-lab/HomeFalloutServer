@@ -281,6 +281,7 @@ class JellyfinClientTests(unittest.IsolatedAsyncioTestCase):
             "series_id": None,
             "season_number": None,
             "episode_number": None,
+            "provider_ids": {},
         })
         self.assertEqual(self.requests[-1].url.params["includeItemTypes"], "Movie,Series")
 
@@ -305,6 +306,7 @@ class JellyfinClientTests(unittest.IsolatedAsyncioTestCase):
                 "played": False,
                 "series_title": None,
                 "series_id": None,
+                "provider_ids": {},
         })
         self.assertNotIn(VIRTUAL_EPISODE_ID, {episode["id"] for episode in episodes})
         self.assertNotIn(MISSING_EPISODE_ID, {episode["id"] for episode in episodes})
@@ -404,7 +406,7 @@ class JellyfinClientTests(unittest.IsolatedAsyncioTestCase):
             request for request in self.requests
             if request.url.path == "/Items" and request.url.params.get("ids") == MOVIE_ID
         )
-        self.assertEqual(validation.url.params["fields"], "MediaStreams")
+        self.assertEqual(validation.url.params["fields"], "MediaStreams,ProviderIds,PrimaryImageAspectRatio")
         self.assertEqual(validation.url.params["userId"], "living-room-user")
         self.assertEqual(validation.url.params["enableUserData"], "true")
         self.assertFalse(any(request.url.path == f"/Items/{MOVIE_ID}" for request in self.requests))

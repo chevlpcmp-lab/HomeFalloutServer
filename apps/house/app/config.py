@@ -21,6 +21,15 @@ JELLYFIN_URL = os.environ.get("JELLYFIN_URL", "http://jellyfin.media.svc.cluster
 JELLYFIN_API_KEY = os.environ.get("JELLYFIN_API_KEY", "")
 JELLYFIN_DEVICE_NAME = os.environ.get("JELLYFIN_DEVICE_NAME", "home")
 
+# Read-only availability tracking. Missing credentials leave Jellyfin browsing usable.
+RADARR_URL = os.environ.get("RADARR_URL", "http://radarr.media.svc.cluster.local")
+RADARR_API_KEY = os.environ.get("RADARR_API_KEY", "")
+SONARR_URL = os.environ.get("SONARR_URL", "http://sonarr.media.svc.cluster.local")
+SONARR_API_KEY = os.environ.get("SONARR_API_KEY", "")
+QBIT_URL = os.environ.get("QBIT_URL", "http://qbittorrent.media.svc.cluster.local")
+QBIT_USERNAME = os.environ.get("QBIT_USERNAME", "")
+QBIT_PASSWORD = os.environ.get("QBIT_PASSWORD", "")
+
 # Hyperion runs on the Proxmox host, not in the cluster, and takes this one
 # unauthenticated JSON-RPC call. See docs/ambient-lighting.md.
 HYPERION_URL = os.environ.get("HYPERION_URL", "http://10.0.0.254:8090/json-rpc")

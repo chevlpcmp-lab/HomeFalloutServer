@@ -172,6 +172,20 @@ Connection messages distinguish an unavailable server, offline player, sleeping 
 TV input. **Check again** only reads status. **Wake TV** and **Open TV input** run only when tapped;
 opening or refreshing Overseer never starts playback or changes the TV input.
 
+Search also includes movies and shows already tracked in Radarr and Sonarr. Each movie and
+episode shows **Ready to watch**, **Downloading**, **Importing**, or **Missing**. Active downloads
+include progress, speed, and ETA when available from qBittorrent. Lists refresh about every ten
+seconds without changing your search or selected season. Play controls appear only for files
+Jellyfin can play; download completion alone is not a ready-to-watch signal. Availability failures
+show an unknown status and leave existing Jellyfin playback available. This integration reads
+status only; it never adds, pauses, deletes, or retries downloads.
+
+The server receives `RADARR_API_KEY`, `SONARR_API_KEY`, `QBIT_USERNAME`, and `QBIT_PASSWORD` from
+`house-download-secrets`, encrypted in the house resources SealedSecret. These values stay on
+the server; responses contain no torrent hashes, filesystem paths, or service credentials.
+The URL settings are `RADARR_URL`, `SONARR_URL`, and `QBIT_URL`. Without these credentials,
+Jellyfin browsing and playback continue to work.
+
 To see what is actually on the TV without walking to it, `scrot` is installed:
 
 ```bash

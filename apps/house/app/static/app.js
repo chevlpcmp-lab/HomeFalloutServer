@@ -208,6 +208,7 @@ function renderJellyfin(jellyfin) {
         poster.dataset.itemId = jellyfin.item_id;
         poster.src = `/api/jellyfin/movies/${jellyfin.item_id}/artwork`;
       }
+      if (poster.complete && poster.currentSrc && !poster.naturalWidth) poster.dataset.failedItem = jellyfin.item_id;
       poster.hidden = poster.dataset.failedItem === jellyfin.item_id;
     } else {
       poster.hidden = true;
@@ -417,6 +418,7 @@ function mediaError(error) {
 }
 
 async function startMedia(item, status, restart) {
+  if (item.playable === false || !/^[a-f0-9]{32}$/i.test(String(item.id || ""))) return;
   if (playbackPending) return;
   playbackPending = true;
   const feedback = $("#playback-feedback");
@@ -458,7 +460,7 @@ async function startMedia(item, status, restart) {
     report(`Couldn’t start ${item.title}. ${mediaError(error)}`, "error");
   } finally {
     playbackPending = false;
-    $$('[data-start]').forEach(button => { button.disabled = false; });
+    $$('.movie-result').forEach(row => { if (row._mediaItem) renderAvailability(row, row._mediaItem); });
   }
 }
 
@@ -542,6 +544,9 @@ function mediaResult(item, status) {
   const isSeries = item.type === "Series";
   const isEpisode = item.type === "Episode";
   row.classList.toggle("episode-result", isEpisode);
+  row.dataset.itemId = item.id || "";
+  row.dataset.mediaKey = item.media_key || item.id || "";
+  row._mediaItem = item;
 
   if (!isEpisode) {
     const poster = document.createElement(item.has_image ? "img" : "div");
@@ -549,7 +554,7 @@ function mediaResult(item, status) {
     if (item.has_image) {
       poster.alt = "";
       poster.loading = "lazy";
-      poster.src = `/api/jellyfin/movies/${item.id}/artwork`;
+      poster.src = `/api/jellyfin/movies/${encodeURIComponent(item.id)}/artwork`;
       poster.addEventListener("error", () => {
         const fallback = document.createElement("div");
         fallback.className = "movie-poster";
@@ -574,22 +579,28 @@ function mediaResult(item, status) {
       item.rating == null ? null : `${item.rating} rating`].filter(Boolean).join(" · ");
   info.append(title, details);
 
+  const availabilityEl = document.createElement("span");
+  availabilityEl.className = "media-availability";
+  info.append(availabilityEl);
+
   const actions = document.createElement("div");
   actions.className = "media-actions";
   const action = document.createElement("button");
   action.type = "button";
   action.className = "movie-play";
-  const resume = !isSeries && Number.isFinite(item.resume_seconds) && item.resume_seconds > 0;
+  const playable = isSeries || (item.playable !== false && /^[a-f0-9]{32}$/i.test(String(item.id || "")));
+  const resume = playable && !isSeries && Number.isFinite(item.resume_seconds) && item.resume_seconds > 0;
   action.textContent = isSeries ? "Episodes" : (resume ? `Resume ${mediaTime(item.resume_seconds)}` : "Play on TV");
   action.setAttribute("aria-label", isSeries
     ? `Choose an episode of ${item.title}` : `${resume ? "Resume" : "Play"} ${item.title} on the TV`);
   if (!isSeries) {
     action.dataset.start = "1";
-    action.disabled = playbackPending;
+    action.disabled = playbackPending || !playable;
   }
   action.addEventListener("click", () => {
-    if (isSeries) openSeries(item, action);
-    else startMedia(item, status, false);
+    const current = row._mediaItem || item;
+    if (isSeries) openSeries(current, action);
+    else startMedia(current, status, false);
   });
   actions.append(action);
   if (resume) {
@@ -600,17 +611,116 @@ function mediaResult(item, status) {
     restart.disabled = playbackPending;
     restart.textContent = "Start over";
     restart.setAttribute("aria-label", `Start ${item.title} from the beginning on the TV`);
-    restart.addEventListener("click", () => startMedia(item, status, true));
+    restart.addEventListener("click", () => startMedia(row._mediaItem || item, status, true));
     actions.append(restart);
   }
+  if (!isSeries && !playable) action.hidden = true;
   row.append(info, actions);
+  renderAvailability(row, item);
   return row;
+}
+
+function humanRate(value) {
+  if (!Number.isFinite(value) || value <= 0) return "";
+  const units = ["B/s", "KB/s", "MB/s", "GB/s"];
+  let n = value, i = 0;
+  while (n >= 1000 && i < units.length - 1) { n /= 1000; i += 1; }
+  return `${n >= 10 ? Math.round(n) : n.toFixed(1)} ${units[i]}`;
+}
+
+function availabilityText(a) {
+  const state = a?.state || "unknown";
+  if (state === "ready") return "Ready to watch";
+  if (state === "downloading") return `Downloading${Number.isFinite(a.progress) ? ` ${Math.round(a.progress)}%` : ""}`;
+  if (state === "importing") return "Importing";
+  if (state === "missing") return a.message || "Missing";
+  if (state === "paused") return "Paused";
+  if (state === "stalled") return "Stalled";
+  if (state === "error") return a.message || "Unavailable";
+  return a.message || "Availability unknown";
+}
+
+function itemAvailability(item) {
+  if (item.availability) return item.availability;
+  return /^[a-f0-9]{32}$/i.test(String(item.id || "")) ? { state: "ready" } : { state: "unknown" };
+}
+
+function renderAvailability(row, item) {
+  const a = itemAvailability(item);
+  const el = row.querySelector(".media-availability");
+  if (!el) return;
+  el.textContent = availabilityText(a);
+  const extra = [humanRate(a.speed_bps), Number.isFinite(a.eta_seconds) ? `ETA ${mediaTime(a.eta_seconds)}` : ""].filter(Boolean);
+  if (extra.length) el.textContent += ` · ${extra.join(" · ")}`;
+  let progress = row.querySelector("progress.media-progress");
+  if (["downloading", "importing"].includes(a.state) && Number.isFinite(a.progress)) {
+    if (!progress) { progress = document.createElement("progress"); progress.className = "media-progress"; el.after(progress); }
+    progress.max = 100; progress.value = clamp(a.progress, 0, 100); progress.setAttribute("aria-label", `${Math.round(a.progress)} percent complete`);
+  } else if (progress) progress.remove();
+  const playable = item.type === "Series" || (item.playable !== false && /^[a-f0-9]{32}$/i.test(String(item.id || "")));
+  const action = row.querySelector(".movie-play");
+  if (action && item.type !== "Series") {
+    action.disabled = playbackPending || !playable;
+    action.hidden = !playable;
+    action.textContent = playable ? (Number.isFinite(item.resume_seconds) && item.resume_seconds > 0 ? `Resume ${mediaTime(item.resume_seconds)}` : "Play on TV") : "Play on TV";
+    const restart = row.querySelector(".media-restart");
+    if (restart) restart.hidden = !playable;
+  }
 }
 
 let activeSeries = null;
 let seriesTrigger = null;
 let libraryRequest = 0;
 let episodeRequest = 0;
+let libraryQuery = "";
+let availabilityRefreshInFlight = false;
+let availabilityRefreshTicket = 0;
+
+function updateVisibleItems(items) {
+  (items || []).forEach(item => {
+    const key = String(item.media_key || item.id || "");
+    $$('.movie-result').filter(candidate => candidate.dataset.mediaKey === key).forEach(row => {
+      row._mediaItem = item;
+      row.dataset.itemId = item.id || "";
+      renderAvailability(row, item);
+    });
+  });
+}
+
+function renderAvailabilityWarning(response) {
+  const notice = $("#availability-warning");
+  if (!notice) return;
+  notice.textContent = response.availability_warning || "";
+  notice.hidden = !notice.textContent;
+}
+
+async function refreshVisibleAvailability() {
+  if (document.visibilityState !== "visible" || availabilityRefreshInFlight) return;
+  const ticket = ++availabilityRefreshTicket;
+  const queryAtStart = libraryQuery;
+  const seriesAtStart = activeSeries;
+  const seasonAtStart = $("#series-season")?.value || "";
+  availabilityRefreshInFlight = true;
+  try {
+    const response = queryAtStart
+      ? await api("/api/jellyfin/search", { query: queryAtStart })
+      : await libraryGet("/api/jellyfin/recent");
+    if (ticket !== availabilityRefreshTicket || queryAtStart !== libraryQuery) return;
+    renderAvailabilityWarning(response);
+    updateVisibleItems(response.items);
+    if (seriesAtStart && seasonAtStart && activeSeries === seriesAtStart && seasonAtStart === $("#series-season")?.value) {
+      const episodes = await libraryGet(`/api/jellyfin/series/${encodeURIComponent(seriesAtStart.id)}/episodes?season_id=${encodeURIComponent(seasonAtStart)}`);
+      if (ticket !== availabilityRefreshTicket || activeSeries !== seriesAtStart || seasonAtStart !== $("#series-season")?.value) return;
+      updateVisibleItems((episodes.episodes || []).map(item => ({ ...item, type: "Episode" })));
+    }
+    for (const kind of ["continue", "next-up"]) {
+      const history = await libraryGet(`/api/jellyfin/${kind}`);
+      if (ticket !== availabilityRefreshTicket) return;
+      updateVisibleItems(history.items);
+    }
+  } catch { /* regular state refresh and the next poll will retry */ }
+  finally { availabilityRefreshInFlight = false; }
+}
 
 function closeSeries() {
   activeSeries = null;
@@ -630,7 +740,7 @@ async function loadEpisodes() {
   status.textContent = "Loading episodes…";
   try {
     const response = await libraryGet(
-      `/api/jellyfin/series/${series.id}/episodes?season_id=${encodeURIComponent(seasonId)}`);
+      `/api/jellyfin/series/${encodeURIComponent(series.id)}/episodes?season_id=${encodeURIComponent(seasonId)}`);
     if (ticket !== episodeRequest) return;
     results.replaceChildren(...response.episodes.map(item => mediaResult({ ...item, type: "Episode" }, status)));
     status.textContent = response.episodes.length
@@ -656,7 +766,7 @@ async function openSeries(series, trigger) {
   $("#episode-results").replaceChildren();
   status.textContent = "Loading seasons…";
   try {
-    const response = await libraryGet(`/api/jellyfin/series/${series.id}/seasons`);
+    const response = await libraryGet(`/api/jellyfin/series/${encodeURIComponent(series.id)}/seasons`);
     if (ticket !== libraryRequest || activeSeries !== series) return;
     response.seasons.forEach(season => {
       const option = document.createElement("option");
@@ -680,6 +790,7 @@ if (movieSearchForm) {
   const results = $("#movie-results");
   const heading = $("#movie-results-title");
   async function loadLibrary(query = "") {
+    libraryQuery = query;
     const ticket = ++libraryRequest;
     closeSeries();
     status.textContent = query ? "Searching…" : "Loading your library…";
@@ -689,6 +800,7 @@ if (movieSearchForm) {
         ? await api("/api/jellyfin/search", { query })
         : await libraryGet("/api/jellyfin/recent");
       if (ticket !== libraryRequest) return;
+      renderAvailabilityWarning(response);
       results.replaceChildren(...response.items.map(item => mediaResult(item, status)));
       heading.textContent = query ? `Results for “${query}”` : "Recently added";
       status.textContent = response.items.length
@@ -714,6 +826,7 @@ if (movieSearchForm) {
     if (!event.target.value) loadLibrary();
   });
   loadLibrary();
+  setInterval(refreshVisibleAvailability, 10000);
 }
 
 const jellyPoster = $("#jelly-poster");

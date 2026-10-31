@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 
 from app import config
 from app.db import Store
+from app.downloads import Downloads
 from app.jellyfin import Jellyfin
 from app.main import COOKIE, app
 from app.rooms import TV_MEDIA_PLAYER
@@ -34,7 +35,7 @@ E1 = "55555555555555555555555555555555"
 E2 = "66666666666666666666666666666666"
 E3 = "77777777777777777777777777777777"
 
-mode = {"playback_ack": True, "disconnected": False, "server_error": False, "tv_asleep": False, "account_missing": False}
+mode = {"playback_ack": True, "disconnected": False, "server_error": False, "tv_asleep": False, "account_missing": False, "download_error": False, "imported": False}
 events: list[dict] = []
 player = {"item": MOVIE, "position": 1200, "paused": False}
 
@@ -43,13 +44,13 @@ def item(i: str, typ: str, name: str, **kw) -> dict:
     out.update(kw)
     return out
 
-MOVIE_ITEM = item(MOVIE, "Movie", "The QA Movie", RunTimeTicks=7200 * 10_000_000, UserData={"PlaybackPositionTicks": 1200 * 10_000_000})
+MOVIE_ITEM = item(MOVIE, "Movie", "The QA Movie", ProviderIds={"Tmdb": "101"}, RunTimeTicks=7200 * 10_000_000, UserData={"PlaybackPositionTicks": 1200 * 10_000_000})
 EPISODES = [item(E1, "Episode", "Pilot", SeriesId=SERIES, SeriesName="QA Show", ParentIndexNumber=1, IndexNumber=1, RunTimeTicks=1800 * 10_000_000, UserData={"PlaybackPositionTicks": 90 * 10_000_000}), item(E2, "Episode", "Finale", SeriesId=SERIES, SeriesName="QA Show", ParentIndexNumber=1, IndexNumber=2, RunTimeTicks=1800 * 10_000_000, UserData={"Played": True}), item(E3, "Episode", "Return", SeriesId=SERIES, SeriesName="QA Show", ParentIndexNumber=2, IndexNumber=1, RunTimeTicks=1800 * 10_000_000, UserData={})]
 
 def session() -> dict | None:
     if mode["disconnected"]:
         return None
-    current = next((x for x in [MOVIE_ITEM, *EPISODES] if x["Id"] == player["item"]), MOVIE_ITEM)
+    current = next((x for x in [MOVIE_ITEM, item("8" * 32, "Movie", "QA Download", ProviderIds={"Tmdb": "102"}), *EPISODES] if x["Id"] == player["item"]), MOVIE_ITEM)
     current = {**current, "MediaStreams": []}
     return {"Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "DeviceName": "home", "SupportsRemoteControl": True, **({} if mode["account_missing"] else {"UserId": USER_ID, "UserName": "Living room"}), "NowPlayingItem": current, "PlayState": {"IsPaused": player["paused"], "CanSeek": True, "PositionTicks": player["position"] * 10_000_000}}
 
@@ -59,9 +60,40 @@ async def jellyfin_transport(request: httpx.Request) -> httpx.Response:
     path, q = request.url.path, dict(request.url.params)
     if path == "/Sessions": return httpx.Response(200, json=[] if mode["disconnected"] else [session()], request=request)
     if path == "/Items":
-        ids = q.get("ids"); values = [MOVIE_ITEM, item(SERIES, "Series", "QA Show"), *EPISODES]
+        ids = q.get("ids"); values = [MOVIE_ITEM, item(SERIES, "Series", "QA Show", ProviderIds={"Tvdb": "707"}), *EPISODES]
+        if mode["imported"]: values.append(item("8" * 32, "Movie", "QA Download", ProviderIds={"Tmdb": "102"}))
+        if q.get("includeItemTypes"): values = [x for x in values if x["Type"] in q["includeItemTypes"].split(",")]
+        if q.get("searchTerm"): values = [x for x in values if q["searchTerm"].casefold() in x["Name"].casefold()]
         if ids: values = [x for x in values if x["Id"] in ids.split(",")]
         return httpx.Response(200, json={"Items": values}, request=request)
+    if path.startswith("/api/v3/") and mode["download_error"]:
+        return httpx.Response(503, request=request)
+    if path == "/api/v3/movie":
+        return httpx.Response(200, json=[
+            {"id": 1, "title": "The QA Movie", "tmdbId": 101, "hasFile": True},
+            {"id": 2, "title": "QA Download", "tmdbId": 102, "hasFile": mode["imported"]},
+            {"id": 3, "title": "QA Import", "tmdbId": 103, "hasFile": True},
+            {"id": 4, "title": "QA Missing", "tmdbId": 104, "hasFile": False},
+        ], request=request)
+    if path == "/api/v3/series":
+        return httpx.Response(200, json=[{"id": 7, "title": "QA Show", "tvdbId": 707,
+            "seasons": [{"seasonNumber": 1}, {"seasonNumber": 2}]}], request=request)
+    if path == "/api/v3/episode":
+        rows = [{"id": 71 + n, "seriesId": 7, "seasonNumber": e["ParentIndexNumber"],
+                 "episodeNumber": e["IndexNumber"], "title": e["Name"], "hasFile": True}
+                for n, e in enumerate(EPISODES)]
+        rows += [{"id": 74, "seriesId": 7, "seasonNumber": 2, "episodeNumber": 2, "title": "On the way", "hasFile": False},
+                 {"id": 75, "seriesId": 7, "seasonNumber": 2, "episodeNumber": 3, "title": "Being imported", "hasFile": True},
+                 {"id": 76, "seriesId": 7, "seasonNumber": 2, "episodeNumber": 4, "title": "Missing episode", "hasFile": False}]
+        return httpx.Response(200, json=rows, request=request)
+    if path == "/api/v3/queue":
+        rows = [{"movieId": 2, "status": "downloading", "trackedDownloadStatus": "ok", "downloadId": "hash1", "size": 100, "sizeleft": 36}] if request.url.host == "radarr" else [
+            {"seriesId": 7, "episodeId": 74, "seasonNumber": 2, "status": "downloading", "downloadId": "hash2", "size": 100, "sizeleft": 36}]
+        return httpx.Response(200, json={"records": rows, "totalRecords": len(rows)}, request=request)
+    if path == "/api/v2/torrents/info":
+        return httpx.Response(200, json=[{"hash": h, "state": "downloading", "progress": .64,
+            "dlspeed": 2_000_000, "eta": 180} for h in ["hash1", "hash2"]], request=request)
+    if path == "/api/v2/auth/login": return httpx.Response(200, text="Ok.", request=request)
     if path.endswith("/Seasons"): return httpx.Response(200, json={"Items": [item(S1, "Season", "Season 1", IndexNumber=1), item(S2, "Season", "Season 2", IndexNumber=2)]}, request=request)
     if path.endswith("/Episodes"): return httpx.Response(200, json={"Items": [x for x in EPISODES if not q.get("seasonId") or (q["seasonId"] == S1 and x["ParentIndexNumber"] == 1) or (q["seasonId"] == S2 and x["ParentIndexNumber"] == 2)]}, request=request)
     if path.startswith(f"/Users/{USER_ID}/Items/Resume"): return httpx.Response(200, json={"Items": [MOVIE_ITEM, EPISODES[0]]}, request=request)
@@ -92,8 +124,9 @@ async def lifespan(_app):
         store = Store(str(Path(td) / "fixture.db")); uid = store.create_user("qa", "QA", "qa", is_admin=True, must_change=False); store.grant(uid, "living_room")
         _app.state.store, _app.state.ha, _app.state.hyperion = store, HA(), Hyperion()
         _app.state.jellyfin = Jellyfin("http://fixture", "fixture", "home", transport=httpx.MockTransport(jellyfin_transport))
+        _app.state.downloads = Downloads("http://radarr", "radarr", "http://sonarr", "sonarr", "http://qbit", "qa", "qa", transport=httpx.MockTransport(jellyfin_transport))
         yield
-        await _app.state.jellyfin.aclose()
+        await _app.state.downloads.aclose(); await _app.state.jellyfin.aclose()
 
 app.router.lifespan_context = lifespan
 
@@ -101,6 +134,7 @@ app.router.lifespan_context = lifespan
 async def qa_mode(request: Request):
     body = await request.json(); mode.update({k: bool(v) for k, v in body.items() if k in mode});
     if body.get("reset"): events.clear(); player.update(item=MOVIE, position=1200, paused=False)
+    app.state.downloads.cached_at = 0
     return {"mode": mode, "events": events}
 @app.get("/__qa/events")
 async def qa_events(): return {"events": events}

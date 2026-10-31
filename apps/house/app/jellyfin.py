@@ -185,6 +185,11 @@ class Jellyfin:
     def _safe_item(item: dict) -> dict:
         rating = item.get("CommunityRating")
         user_data = item.get("UserData") or {}
+        provider_ids = {
+            str(key).lower(): str(value)
+            for key, value in (item.get("ProviderIds") or {}).items()
+            if str(key).lower() in {"tmdb", "tvdb", "imdb"} and value not in (None, "")
+        }
         return {
             "id": item["Id"],
             "title": item.get("Name") or "Untitled",
@@ -198,6 +203,7 @@ class Jellyfin:
             "series_id": item.get("SeriesId"),
             "season_number": item.get("ParentIndexNumber"),
             "episode_number": item.get("IndexNumber"),
+            "provider_ids": provider_ids,
         }
 
     @classmethod
@@ -235,7 +241,7 @@ class Jellyfin:
             "ids": item_id,
             "recursive": "true",
             "limit": 1,
-            "fields": "MediaStreams",
+            "fields": "MediaStreams,ProviderIds,PrimaryImageAspectRatio",
         }
         if user_id:
             params.update({"userId": user_id, "enableUserData": "true"})
@@ -266,7 +272,7 @@ class Jellyfin:
             includeItemTypes="Movie,Series",
             recursive="true",
             limit=limit,
-            fields="PrimaryImageAspectRatio",
+            fields="PrimaryImageAspectRatio,ProviderIds",
             sortBy="SortName",
             sortOrder="Ascending",
             **user_params,
@@ -290,7 +296,7 @@ class Jellyfin:
             includeItemTypes="Movie,Series",
             recursive="true",
             limit=limit,
-            fields="PrimaryImageAspectRatio",
+            fields="PrimaryImageAspectRatio,ProviderIds",
             sortBy="DateCreated",
             sortOrder="Descending",
             **user_params,
@@ -324,6 +330,13 @@ class Jellyfin:
             )
         ]
         return sorted(results, key=lambda season: (season["number"], season["title"].casefold()))
+
+    async def media_metadata(self, item_id: str) -> dict | None:
+        """Safe identity metadata for local read-only library adapters."""
+        item = await self._item(item_id)
+        if not item or item.get("Type") not in {"Movie", "Series", "Episode"}:
+            return None
+        return self._safe_item(item)
 
     async def episodes(self, series_id: str, season_id: str) -> list[dict]:
         # Fetching seasons first prevents a season id from another series being
