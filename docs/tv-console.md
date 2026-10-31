@@ -156,6 +156,22 @@ lights from it — see [Ambient lighting](ambient-lighting.md).
 The keyboard is no longer the only way to drive this. [The household remote](remote.md) controls the
 TV itself — power, volume, input — and Jellyfin playback, from any phone or laptop in the house.
 
+In Overseer's **Jellyfin** tab, search your existing library for a movie or TV show. Movies have
+a **Play on TV** button; shows have **Episodes**, followed by a season picker and individual
+episode play buttons. **Back to results** preserves your search. Playback targets the configured
+living-room Jellyfin player and attempts to wake the TV and select its Jellyfin input. The player
+must be connected to Jellyfin for remote playback to work. Overseer waits for the
+player to report the requested title and position before confirming playback.
+
+Movies and episodes with saved progress offer **Resume** and **Start over**. **Continue watching**
+and **Next episodes** use the Jellyfin account signed into that TV player. The current episode
+also has a **Play next** action that can cross into the next season. Drag the playback position
+slider to seek; if the title changes while dragging, Overseer cancels that seek.
+
+Connection messages distinguish an unavailable server, offline player, sleeping TV, and another
+TV input. **Check again** only reads status. **Wake TV** and **Open TV input** run only when tapped;
+opening or refreshing Overseer never starts playback or changes the TV input.
+
 To see what is actually on the TV without walking to it, `scrot` is installed:
 
 ```bash

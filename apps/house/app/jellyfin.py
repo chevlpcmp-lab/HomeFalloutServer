@@ -22,11 +22,15 @@ class JellyfinSessionUnavailable(JellyfinError):
 
 
 class JellyfinItemUnavailable(JellyfinError):
-    """The requested item is missing or is not a movie."""
+    """The requested item is missing or cannot be played."""
 
 
 class JellyfinStreamUnavailable(JellyfinError):
     """The requested audio or subtitle stream is not available."""
+
+
+class JellyfinPlaybackUnavailable(JellyfinError):
+    """The active player cannot safely perform the requested playback change."""
 
 
 PlaybackAction = Literal[
@@ -86,6 +90,10 @@ def session_state(session: dict | None, reachable: bool = True) -> dict:
             "position": None,
             "duration": None,
             "item_id": None,
+            "series_id": None,
+            "can_seek": False,
+            "user_context_available": False,
+            "user_name": None,
             "audio_streams": [],
             "subtitle_streams": [],
             "audio_stream_index": None,
@@ -117,6 +125,10 @@ def session_state(session: dict | None, reachable: bool = True) -> dict:
         "position": _ticks_to_seconds(play_state.get("PositionTicks")),
         "duration": _ticks_to_seconds(item.get("RunTimeTicks")),
         "item_id": item.get("Id"),
+        "series_id": item.get("SeriesId"),
+        "can_seek": bool(play_state.get("CanSeek")),
+        "user_context_available": bool(session.get("UserId")),
+        "user_name": session.get("UserName") if session.get("UserId") else None,
         "audio_streams": _stream_choices(item, "Audio"),
         "subtitle_streams": _stream_choices(item, "Subtitle"),
         "audio_stream_index": play_state.get("AudioStreamIndex"),
@@ -160,32 +172,80 @@ class Jellyfin:
         return response.json()
 
     @staticmethod
-    def _safe_movies(data: dict) -> list[dict]:
+    def _is_playable(item: dict, allowed_types: set[str]) -> bool:
+        return (
+            item.get("Type") in allowed_types
+            and bool(item.get("Id"))
+            and item.get("IsMissing") is not True
+            and item.get("IsVirtualItem") is not True
+            and item.get("LocationType") != "Virtual"
+        )
+
+    @staticmethod
+    def _safe_item(item: dict) -> dict:
+        rating = item.get("CommunityRating")
+        user_data = item.get("UserData") or {}
+        return {
+            "id": item["Id"],
+            "title": item.get("Name") or "Untitled",
+            "type": item["Type"],
+            "year": item.get("ProductionYear"),
+            "rating": round(rating, 1) if isinstance(rating, (int, float)) else None,
+            "has_image": bool((item.get("ImageTags") or {}).get("Primary")),
+            "resume_seconds": _ticks_to_seconds(user_data.get("PlaybackPositionTicks")) or 0,
+            "played": bool(user_data.get("Played")),
+            "series_title": item.get("SeriesName"),
+            "series_id": item.get("SeriesId"),
+            "season_number": item.get("ParentIndexNumber"),
+            "episode_number": item.get("IndexNumber"),
+        }
+
+    @classmethod
+    def _safe_media(cls, data: dict) -> list[dict]:
         results = []
         for item in data.get("Items", []):
-            if item.get("Type") != "Movie" or not item.get("Id"):
+            if not cls._is_playable(item, {"Movie", "Series"}):
                 continue
-            rating = item.get("CommunityRating")
-            results.append({
-                "id": item["Id"],
-                "title": item.get("Name") or "Untitled",
-                "year": item.get("ProductionYear"),
-                "rating": round(rating, 1) if isinstance(rating, (int, float)) else None,
-                "has_image": bool((item.get("ImageTags") or {}).get("Primary")),
-            })
+            results.append(cls._safe_item(item))
         return results
+
+    @staticmethod
+    def _safe_movies(data: dict) -> list[dict]:
+        """Keep the old movie-only client shape for callers that still use it."""
+        return [
+            {key: item[key] for key in ("id", "title", "year", "rating", "has_image")}
+            for item in Jellyfin._safe_media(data)
+            if item["type"] == "Movie"
+        ]
 
     async def _items(self, **params: Any) -> dict:
         return await self._request("GET", "/Items", params=params)
 
-    async def _item(self, item_id: str) -> dict | None:
+    async def _tv_user_id(self) -> str | None:
+        session = await self._tv_session()
+        user_id = (session or {}).get("UserId")
+        return str(user_id) if user_id else None
+
+    async def _library_params(self) -> dict[str, str]:
+        user_id = await self._tv_user_id()
+        return {"userId": user_id, "enableUserData": "true"} if user_id else {}
+
+    async def _item(self, item_id: str, user_id: str | None = None) -> dict | None:
+        params: dict[str, Any] = {
+            "ids": item_id,
+            "recursive": "true",
+            "limit": 1,
+            "fields": "MediaStreams",
+        }
+        if user_id:
+            params.update({"userId": user_id, "enableUserData": "true"})
         data = await self._items(
-            ids=item_id,
-            recursive="true",
-            limit=1,
-            fields="MediaStreams",
+            **params,
         )
-        return next(iter(data.get("Items") or []), None)
+        return next(
+            (item for item in data.get("Items") or [] if item.get("Id") == item_id),
+            None,
+        )
 
     async def search_movies(self, query: str, limit: int = 12) -> list[dict]:
         data = await self._items(
@@ -199,6 +259,20 @@ class Jellyfin:
         )
         return self._safe_movies(data)
 
+    async def search_media(self, query: str, limit: int = 24) -> list[dict]:
+        user_params = await self._library_params()
+        data = await self._items(
+            searchTerm=query,
+            includeItemTypes="Movie,Series",
+            recursive="true",
+            limit=limit,
+            fields="PrimaryImageAspectRatio",
+            sortBy="SortName",
+            sortOrder="Ascending",
+            **user_params,
+        )
+        return self._safe_media(data)
+
     async def recent_movies(self, limit: int = 12) -> list[dict]:
         data = await self._items(
             includeItemTypes="Movie",
@@ -209,6 +283,89 @@ class Jellyfin:
             sortOrder="Descending",
         )
         return self._safe_movies(data)
+
+    async def recent_media(self, limit: int = 24) -> list[dict]:
+        user_params = await self._library_params()
+        data = await self._items(
+            includeItemTypes="Movie,Series",
+            recursive="true",
+            limit=limit,
+            fields="PrimaryImageAspectRatio",
+            sortBy="DateCreated",
+            sortOrder="Descending",
+            **user_params,
+        )
+        return self._safe_media(data)
+
+    async def seasons(self, series_id: str) -> list[dict]:
+        user_id = await self._tv_user_id()
+        series = await self._item(series_id, user_id)
+        if not series or series.get("Type") != "Series":
+            raise JellyfinItemUnavailable("That show is no longer available")
+        data = await self._request(
+            "GET",
+            f"/Shows/{series_id}/Seasons",
+            params={"fields": "PrimaryImageAspectRatio", **(
+                {"userId": user_id, "enableUserData": "true"} if user_id else {})},
+        )
+        results = [
+            {
+                "id": item["Id"],
+                "title": item.get("Name") or "Season",
+                "number": item.get("IndexNumber"),
+            }
+            for item in data.get("Items", [])
+            if (
+                item.get("Id")
+                and isinstance(item.get("IndexNumber"), int)
+                and item.get("IsMissing") is not True
+                and item.get("IsVirtualItem") is not True
+                and item.get("LocationType") != "Virtual"
+            )
+        ]
+        return sorted(results, key=lambda season: (season["number"], season["title"].casefold()))
+
+    async def episodes(self, series_id: str, season_id: str) -> list[dict]:
+        # Fetching seasons first prevents a season id from another series being
+        # used to browse unrelated content.
+        season_ids = {season["id"] for season in await self.seasons(series_id)}
+        if season_id not in season_ids:
+            raise JellyfinItemUnavailable("That season is no longer available")
+        user_id = await self._tv_user_id()
+        data = await self._request(
+            "GET",
+            f"/Shows/{series_id}/Episodes",
+            params={
+                "seasonId": season_id,
+                "fields": "PrimaryImageAspectRatio",
+                **({"userId": user_id, "enableUserData": "true"} if user_id else {}),
+            },
+        )
+        results = []
+        for item in data.get("Items", []):
+            if (
+                item.get("Type") != "Episode"
+                or not item.get("Id")
+                or item.get("IsMissing") is True
+                or item.get("IsVirtualItem") is True
+                or item.get("LocationType") == "Virtual"
+            ):
+                continue
+            results.append({
+                **self._safe_item(item), "type": "Episode",
+            })
+        return sorted(
+            results,
+            key=lambda episode: (
+                episode["season_number"]
+                if isinstance(episode["season_number"], int)
+                else 10**9,
+                episode["episode_number"]
+                if isinstance(episode["episode_number"], int)
+                else 10**9,
+                episode["title"].casefold(),
+            ),
+        )
 
     async def artwork(self, item_id: str) -> tuple[bytes, str]:
         response = await self._response(
@@ -246,6 +403,63 @@ class Jellyfin:
             if full_item:
                 session = {**session, "NowPlayingItem": {**item, **full_item}}
         return session_state(session)
+
+    async def continue_watching(self, limit: int = 12) -> list[dict]:
+        user_id = await self._tv_user_id()
+        if not user_id:
+            return []
+        data = await self._request("GET", f"/Users/{user_id}/Items/Resume", params={
+            "includeItemTypes": "Movie,Episode", "limit": limit,
+            "fields": "PrimaryImageAspectRatio",
+            "enableUserData": "true",
+        })
+        return [self._safe_item(item) for item in data.get("Items", [])
+                if self._is_playable(item, {"Movie", "Episode"})]
+
+    async def next_up(self, limit: int = 12) -> list[dict]:
+        user_id = await self._tv_user_id()
+        if not user_id:
+            return []
+        data = await self._request("GET", "/Shows/NextUp", params={
+            "userId": user_id, "limit": limit,
+            "fields": "PrimaryImageAspectRatio",
+            "enableUserData": "true",
+        })
+        return [self._safe_item(item) for item in data.get("Items", [])
+                if self._is_playable(item, {"Episode"})]
+
+    async def next_episode(self) -> dict | None:
+        session = await self._tv_session()
+        current = (session or {}).get("NowPlayingItem") or {}
+        series_id = current.get("SeriesId")
+        if (
+            current.get("Type") != "Episode"
+            or not series_id
+            or not isinstance(current.get("ParentIndexNumber"), int)
+            or not isinstance(current.get("IndexNumber"), int)
+        ):
+            return None
+        params = {"fields": "PrimaryImageAspectRatio"}
+        if session.get("UserId"):
+            params.update({"userId": str(session["UserId"]), "enableUserData": "true"})
+        data = await self._request("GET", f"/Shows/{series_id}/Episodes", params=params)
+        current_key = (current["ParentIndexNumber"], current["IndexNumber"])
+        candidates = [item for item in data.get("Items", [])
+                      if self._is_playable(item, {"Episode"})
+                      and isinstance(item.get("ParentIndexNumber"), int)
+                      and isinstance(item.get("IndexNumber"), int)]
+        later = [item for item in candidates if (
+            item.get("ParentIndexNumber") if isinstance(item.get("ParentIndexNumber"), int) else 10**9,
+            item.get("IndexNumber") if isinstance(item.get("IndexNumber"), int) else 10**9,
+        ) > current_key]
+        if not later:
+            return None
+        next_item = min(later, key=lambda item: (
+            item.get("ParentIndexNumber") if isinstance(item.get("ParentIndexNumber"), int) else 10**9,
+            item.get("IndexNumber") if isinstance(item.get("IndexNumber"), int) else 10**9,
+            str(item.get("Name", "")).casefold(),
+        ))
+        return self._safe_item(next_item)
 
     async def _required_session(self) -> dict:
         session = await self._tv_session()
@@ -285,19 +499,37 @@ class Jellyfin:
         )
 
     async def play_movie(self, item_id: str) -> None:
+        await self.play_item(item_id)
+
+    async def play_item(self, item_id: str, restart: bool = False) -> int:
         # Jellyfin 10.11's /Items/{id} route requires a user id even for an API
         # key. The collection route accepts an id filter and is API-key safe.
-        item = await self._item(item_id)
-        if not item or item.get("Type") != "Movie":
-            raise JellyfinItemUnavailable("That movie is no longer available")
         session = await self._required_session()
+        user_id = str(session["UserId"]) if session.get("UserId") else None
+        item = await self._item(item_id, user_id)
+        if (
+            not item
+            or item.get("Type") not in {"Movie", "Episode"}
+            or item.get("IsMissing") is True
+            or item.get("IsVirtualItem") is True
+            or item.get("LocationType") == "Virtual"
+        ):
+            raise JellyfinItemUnavailable("That item cannot be played")
+        resume = 0 if restart or not user_id else int(
+            ((item.get("UserData") or {}).get("PlaybackPositionTicks") or 0)
+        )
+        current_item = session.get("NowPlayingItem") or {}
+        if not restart and current_item.get("Id") == item_id:
+            live_position = (session.get("PlayState") or {}).get("PositionTicks")
+            if isinstance(live_position, (int, float)):
+                resume = max(resume, int(live_position))
         await self._request(
             "POST",
             f"/Sessions/{session['Id']}/Playing",
             params={
                 "playCommand": "PlayNow",
                 "itemIds": item_id,
-                "startPositionTicks": 0,
+                "startPositionTicks": max(0, resume),
             },
         )
         # Jellyfin Desktop can preserve the previous paused state when PlayNow
@@ -306,6 +538,23 @@ class Jellyfin:
         await self._request(
             "POST", f"/Sessions/{session['Id']}/Playing/Unpause"
         )
+        return _ticks_to_seconds(resume) or 0
+
+    async def seek(self, item_id: str, seconds: float) -> int:
+        session = await self._required_session()
+        item = session.get("NowPlayingItem") or {}
+        play_state = session.get("PlayState") or {}
+        if item.get("Id") != item_id:
+            raise JellyfinPlaybackUnavailable("The TV changed what it is playing")
+        if not play_state.get("CanSeek"):
+            raise JellyfinPlaybackUnavailable("This title cannot be scrubbed")
+        duration = item.get("RunTimeTicks")
+        if not isinstance(duration, (int, float)) or duration <= 0:
+            raise JellyfinPlaybackUnavailable("This title has no seekable duration")
+        ticks = min(max(0, round(seconds * 10_000_000)), int(duration))
+        await self._request("POST", f"/Sessions/{session['Id']}/Playing/Seek",
+                            params={"seekPositionTicks": ticks})
+        return _ticks_to_seconds(ticks) or 0
 
     async def set_stream(self, stream_type: Literal["audio", "subtitle"], index: int) -> None:
         session = await self._required_session()

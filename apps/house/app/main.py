@@ -9,6 +9,8 @@ use, but this file is what enforces it.
 from __future__ import annotations
 
 import asyncio
+import math
+import re
 import secrets
 import time
 from contextlib import asynccontextmanager
@@ -31,6 +33,7 @@ from .jellyfin import (
     Jellyfin,
     JellyfinError,
     JellyfinItemUnavailable,
+    JellyfinPlaybackUnavailable,
     JellyfinSessionUnavailable,
     JellyfinStreamUnavailable,
     PlaybackAction,
@@ -507,6 +510,11 @@ async def _jellyfin_stream_error(request: Request, exc: JellyfinStreamUnavailabl
     return JSONResponse({"detail": str(exc)}, status_code=409)
 
 
+@app.exception_handler(JellyfinPlaybackUnavailable)
+async def _jellyfin_playback_error(request: Request, exc: JellyfinPlaybackUnavailable):
+    return JSONResponse({"detail": str(exc)}, status_code=409)
+
+
 @app.exception_handler(JellyfinError)
 async def _jellyfin_error(request: Request, exc: JellyfinError):
     return JSONResponse({"detail": str(exc)}, status_code=502)
@@ -606,6 +614,12 @@ class MovieSearch(BaseModel):
 
 class MovieChoice(BaseModel):
     item_id: str = Field(pattern=r"^[0-9A-Fa-f]{32}$")
+    restart: bool = False
+
+
+class SeekChoice(BaseModel):
+    item_id: str = Field(pattern=r"^[0-9A-Fa-f]{32}$")
+    seconds: float = Field(ge=0)
 
 
 @app.post("/api/jellyfin/search")
@@ -617,12 +631,51 @@ async def jellyfin_search(
     query = search.query.strip()
     if len(query) < 2:
         raise HTTPException(400, "Enter at least two characters")
-    return {"movies": await _jellyfin(request).search_movies(query)}
+    items = await _jellyfin(request).search_media(query)
+    # Keep `movies` for older clients while new clients can render both types.
+    return {"items": items, "movies": [item for item in items if item["type"] == "Movie"]}
 
 
 @app.get("/api/jellyfin/recent")
 async def jellyfin_recent(request: Request, user: User = Depends(api_user)):
-    return {"movies": await _jellyfin(request).recent_movies()}
+    items = await _jellyfin(request).recent_media()
+    return {"items": items, "movies": [item for item in items if item["type"] == "Movie"]}
+
+
+@app.get("/api/jellyfin/continue")
+async def jellyfin_continue(request: Request, user: User = Depends(api_user)):
+    return {"items": await _jellyfin(request).continue_watching()}
+
+
+@app.get("/api/jellyfin/next-up")
+async def jellyfin_next_up(request: Request, user: User = Depends(api_user)):
+    return {"items": await _jellyfin(request).next_up()}
+
+
+@app.get("/api/jellyfin/next-episode")
+async def jellyfin_next_episode(request: Request, user: User = Depends(api_user)):
+    return {"item": await _jellyfin(request).next_episode()}
+
+
+@app.get("/api/jellyfin/series/{series_id}/seasons")
+async def jellyfin_seasons(
+    request: Request,
+    series_id: str = ApiPath(pattern=r"^[0-9A-Fa-f]{32}$"),
+    user: User = Depends(api_user),
+):
+    return {"seasons": await _jellyfin(request).seasons(series_id)}
+
+
+@app.get("/api/jellyfin/series/{series_id}/episodes")
+async def jellyfin_episodes(
+    request: Request,
+    series_id: str = ApiPath(pattern=r"^[0-9A-Fa-f]{32}$"),
+    season_id: str = "",
+    user: User = Depends(api_user),
+):
+    if not season_id or not re.fullmatch(r"[0-9A-Fa-f]{32}", season_id):
+        raise HTTPException(400, "Choose a valid season")
+    return {"episodes": await _jellyfin(request).episodes(series_id, season_id)}
 
 
 @app.get("/api/jellyfin/movies/{item_id}/artwork")
@@ -639,12 +692,7 @@ async def jellyfin_artwork(
     )
 
 
-@app.post("/api/jellyfin/play")
-async def jellyfin_play_movie(
-    request: Request,
-    choice: MovieChoice,
-    user: User = Depends(api_user),
-):
+async def _ready_tv_for_jellyfin(request: Request) -> bool:
     # Waking/routing the Samsung is helpful, but a temporary HA failure must not
     # prevent the actual Jellyfin PlayNow command from reaching its TV client.
     tv_ready = True
@@ -662,8 +710,35 @@ async def jellyfin_play_movie(
             )
     except HAError:
         tv_ready = False
-    await _jellyfin(request).play_movie(choice.item_id)
-    return {"ok": True, "tv_ready": tv_ready}
+    return tv_ready
+
+
+@app.post("/api/jellyfin/connect")
+async def jellyfin_connect(request: Request, user: User = Depends(api_user)):
+    """Wake and route the TV without issuing any Jellyfin player command."""
+    return {"ok": True, "tv_ready": await _ready_tv_for_jellyfin(request)}
+
+
+@app.post("/api/jellyfin/play")
+async def jellyfin_play_movie(
+    request: Request,
+    choice: MovieChoice,
+    user: User = Depends(api_user),
+):
+    tv_ready = await _ready_tv_for_jellyfin(request)
+    start_seconds = await _jellyfin(request).play_item(choice.item_id, choice.restart)
+    return {"ok": True, "tv_ready": tv_ready, "item_id": choice.item_id,
+            "start_seconds": start_seconds}
+
+
+@app.post("/api/jellyfin/seek")
+async def jellyfin_seek(
+    request: Request, choice: SeekChoice, user: User = Depends(api_user),
+):
+    if not math.isfinite(choice.seconds):
+        raise HTTPException(400, "Choose a valid position")
+    seconds = await _jellyfin(request).seek(choice.item_id, choice.seconds)
+    return {"ok": True, "item_id": choice.item_id, "seconds": seconds}
 
 
 class StreamChoice(BaseModel):

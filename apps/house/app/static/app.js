@@ -58,6 +58,14 @@ function setToggle(el, on) {
 
 const PAGE = document.body.dataset.page;
 let refreshTimer = 0;
+let currentJellyfin = null;
+let playbackPending = false;
+let seekDragging = false;
+let seekItemId = null;
+let seekHoldUntil = 0;
+let nextEpisodeItem = null;
+let nextEpisodeRequest = 0;
+let historyUserAvailable = null;
 
 /* Turning sync on or off changes what the server renders (notes, disabled
    controls), so lights pages reload rather than mirroring that logic here. */
@@ -69,6 +77,7 @@ function applyState(s) {
     return;
   }
   renderRemote(s);
+  renderConnection(s);
   renderJellyfin(s.jellyfin);
   renderLights(s);
   renderLightDetail(s);
@@ -79,7 +88,16 @@ async function refresh() {
     const res = await fetch("/api/state", { cache: "no-store" });
     if (res.status === 401) { location.href = "/login"; return; }
     if (res.ok) applyState(await res.json());
-  } catch { /* the next poll retries */ }
+  } catch {
+    const note = $("#player-connection");
+    if (note) {
+      note.hidden = false;
+      $("#connection-title").textContent = "Connection lost";
+      $("#connection-help").textContent = "Check your connection to Overseer, then try again.";
+      $("#player-connect").textContent = "Check again";
+      $("#player-connect").dataset.recovery = "check";
+    }
+  }
 }
 
 function scheduleRefresh(ms) {
@@ -130,17 +148,54 @@ function mediaTime(seconds) {
   return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${secs}` : `${minutes}:${secs}`;
 }
 
+function renderConnection(s) {
+  const note = $("#player-connection");
+  if (!note || !s.jellyfin) return;
+  const player = s.jellyfin;
+  const tv = s.tv || {};
+  const button = $("#player-connect");
+  let title = "Ready to play";
+  let help = "";
+  let recovery = "check";
+  let action = "Check again";
+  if (!player.reachable) {
+    title = "Jellyfin is unavailable";
+    help = "Overseer can’t reach your media server. Check again in a moment.";
+  } else if (tv.reachable && !tv.on) {
+    title = "The TV is asleep";
+    help = "Wake it and switch to the Jellyfin input to start watching.";
+    recovery = "connect"; action = "Wake TV";
+  } else if (!player.connected) {
+    title = "Jellyfin player is offline";
+    help = "Switch to the Jellyfin input. If it stays offline, open Jellyfin on the TV, then check again.";
+    if (tv.reachable && tv.source !== "HDMI") { recovery = "connect"; action = "Open TV input"; }
+  } else if (!tv.reachable) {
+    title = "Player connected; TV status unavailable";
+    help = "Playback controls are connected. TV power and input status can’t be checked right now.";
+  } else if (tv.source !== "HDMI") {
+    title = "The TV is on another input";
+    help = "Switch to Jellyfin to see what’s playing.";
+    recovery = "connect"; action = "Open TV input";
+  }
+  note.hidden = !help;
+  $("#connection-title").textContent = title;
+  if (!button.dataset.busy) {
+    $("#connection-help").textContent = help;
+    button.textContent = action;
+    button.dataset.recovery = recovery;
+  }
+  $("#jellystatus").textContent = title;
+}
+
 function renderJellyfin(jellyfin) {
   const card = $("#jellyfin-card");
   if (!card || !jellyfin) return;
+  currentJellyfin = jellyfin;
   $("#jellydot").classList.toggle("live", jellyfin.connected);
-  $("#jellystatus").textContent = jellyfin.connected
-    ? "TV connected"
-    : (jellyfin.reachable ? "Player offline" : "Server unavailable");
   $("#jellytitle").textContent = jellyfin.title || "Nothing playing";
   $("#jellysub").textContent = jellyfin.subtitle || (
     jellyfin.state === "paused" ? "Paused" : (
-      jellyfin.title ? "Playing on the TV" : (jellyfin.connected ? "Choose a movie below" : "Open Jellyfin on the TV")
+      jellyfin.title ? "Playing on the TV" : (jellyfin.connected ? "Choose a movie or TV show below" : "Open Jellyfin on the TV")
     )
   );
   const stateLabel = $("#jelly-state-label");
@@ -153,7 +208,7 @@ function renderJellyfin(jellyfin) {
         poster.dataset.itemId = jellyfin.item_id;
         poster.src = `/api/jellyfin/movies/${jellyfin.item_id}/artwork`;
       }
-      poster.hidden = false;
+      poster.hidden = poster.dataset.failedItem === jellyfin.item_id;
     } else {
       poster.hidden = true;
       poster.removeAttribute("src");
@@ -163,9 +218,20 @@ function renderJellyfin(jellyfin) {
 
   const position = Number.isFinite(jellyfin.position) ? jellyfin.position : 0;
   const duration = Number.isFinite(jellyfin.duration) ? jellyfin.duration : 0;
-  $("#jellyposition").textContent = mediaTime(position);
+  const seek = $("#jelly-seek");
+  if (!seekDragging && Date.now() >= seekHoldUntil) {
+    $("#jellyposition").textContent = mediaTime(position);
+    seek.max = String(Math.max(1, duration));
+    seek.value = String(clamp(position, 0, duration));
+    seek.setAttribute("aria-valuetext", `${mediaTime(position)} of ${mediaTime(duration)}`);
+  }
+  if (seekDragging && seekItemId !== jellyfin.item_id) {
+    seekDragging = false;
+    seekItemId = null;
+    $("#seek-status").textContent = "The title changed. Choose a position in the current title.";
+  }
+  seek.disabled = !jellyfin.connected || !jellyfin.item_id || !jellyfin.can_seek || !duration;
   $("#jellyduration").textContent = mediaTime(duration);
-  $("#jellyprogress").style.width = (duration ? clamp(position / duration * 100, 0, 100) : 0) + "%";
 
   $$('[data-jellyfin]').forEach((btn) => { btn.disabled = !jellyfin.title; });
   const toggle = $('[data-jellyfin="play_pause"]');
@@ -179,6 +245,18 @@ function renderJellyfin(jellyfin) {
   if (streams) streams.hidden = !jellyfin.title;
   renderStreamSelect($("#audio-select"), jellyfin.audio_streams || [], jellyfin.audio_stream_index);
   renderStreamSelect($("#subtitle-select"), jellyfin.subtitle_streams || [], jellyfin.subtitle_stream_index, true);
+  if (nextEpisodeItem !== jellyfin.item_id) {
+    nextEpisodeItem = jellyfin.item_id;
+    loadNextEpisode(jellyfin.item_id);
+  }
+  const context = JSON.stringify([jellyfin.user_context_available, jellyfin.user_name]);
+  if (historyUserAvailable !== context) {
+    historyUserAvailable = context;
+    const label = $("#history-account");
+    if (label) label.textContent = jellyfin.user_name
+      ? `For ${jellyfin.user_name} on the TV` : "For the TV’s Jellyfin account";
+    loadPersonalLibrary();
+  }
 }
 
 function renderStreamSelect(select, choices, selected, allowOff = false) {
@@ -321,121 +399,382 @@ $$('[data-jellyfin]').forEach((btn) =>
       scheduleRefresh(350);
     })));
 
-function movieResult(movie) {
+async function libraryGet(path) {
+  const res = await fetch(path, { cache: "no-store", signal: AbortSignal.timeout(5000) });
+  if (res.status === 401) { location.href = "/login"; throw new Error("signed out"); }
+  if (!res.ok) {
+    let message = "Your library is unavailable right now. Try again.";
+    try { message = (await res.json()).detail || message; } catch { /* use fallback */ }
+    throw new Error(message);
+  }
+  return res.json();
+}
+
+function mediaError(error) {
+  const message = error?.message || "Something went wrong.";
+  return /Jellyfin answered|unreachable:|\/Sessions|\/Items/.test(message)
+    ? "Jellyfin didn’t answer that request. Check the player connection and try again." : message;
+}
+
+async function startMedia(item, status, restart) {
+  if (playbackPending) return;
+  playbackPending = true;
+  const feedback = $("#playback-feedback");
+  const report = (message, state) => {
+    feedback.hidden = false;
+    feedback.dataset.state = state;
+    feedback.textContent = message;
+    if (status) status.textContent = message;
+  };
+  $$('[data-start]').forEach(button => { button.disabled = true; });
+  report(`Starting ${item.title} on the TV…`, "pending");
+  try {
+    const response = await api("/api/jellyfin/play", { item_id: item.id, restart });
+    const expected = response.start_seconds || 0;
+    const deadline = Date.now() + 12000;
+    let confirmed = false;
+    while (Date.now() < deadline) {
+      try {
+        const state = await libraryGet("/api/state");
+        applyState(state);
+        const player = state.jellyfin;
+        if (player?.connected && player.item_id === item.id && player.state === "playing"
+            && Number.isFinite(player.position) && Math.abs(player.position - expected) <= 20) {
+          confirmed = true;
+          break;
+        }
+      } catch { /* Keep checking; never repeat the playback command. */ }
+      await new Promise(resolve => setTimeout(resolve, 700));
+    }
+    if (!confirmed) {
+      report("The TV hasn’t confirmed playback. Check the TV before trying again.", "error");
+      return;
+    }
+    report(response.tv_ready
+      ? `Playing ${item.title} on the TV.`
+      : `${item.title} is playing. Switch the TV to Jellyfin if the picture isn’t visible.`, "success");
+    loadPersonalLibrary();
+  } catch (error) {
+    report(`Couldn’t start ${item.title}. ${mediaError(error)}`, "error");
+  } finally {
+    playbackPending = false;
+    $$('[data-start]').forEach(button => { button.disabled = false; });
+  }
+}
+
+async function loadNextEpisode(itemId) {
+  const target = $("#next-episode");
+  if (!target) return;
+  const ticket = ++nextEpisodeRequest;
+  target.hidden = true;
+  target.replaceChildren();
+  if (!itemId) return;
+  try {
+    const response = await libraryGet("/api/jellyfin/next-episode");
+    if (ticket !== nextEpisodeRequest || !response.item) return;
+    const label = document.createElement("strong");
+    label.textContent = "Next episode";
+    const row = mediaResult(response.item, $("#playback-feedback"));
+    const button = row.querySelector(".movie-play");
+    if (button) button.textContent = "Play next";
+    target.append(label, row);
+    target.hidden = false;
+  } catch {
+    if (ticket === nextEpisodeRequest) {
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "library-back";
+      retry.textContent = "Check next episode";
+      retry.addEventListener("click", () => loadNextEpisode(itemId));
+      target.append(retry);
+      target.hidden = false;
+    }
+  }
+}
+
+let historyRequest = 0;
+async function loadPersonalLibrary() {
+  if (!$("#continue-results")) return;
+  const ticket = ++historyRequest;
+  const sections = [
+    ["continue", "No saved progress yet. Start a movie or episode from your library."],
+    ["next-up", "No next episodes yet. Your watched shows will appear here."],
+  ];
+  await Promise.all(sections.map(async ([kind, empty]) => {
+    const status = $(`#${kind}-status`);
+    const results = $(`#${kind}-results`);
+    results.replaceChildren();
+    status.textContent = "Loading…";
+    try {
+      const response = await libraryGet(`/api/jellyfin/${kind}`);
+      if (ticket !== historyRequest) return;
+      const items = response.items || [];
+      status.textContent = items.length ? "" : (
+        currentJellyfin?.user_context_available === false
+          ? "Sign into Jellyfin on the TV to see its account’s watch history." : empty);
+      results.replaceChildren(...items.slice(0, 3).map(item => mediaResult(item, status)));
+      if (items.length > 3) {
+        const more = document.createElement("button");
+        more.type = "button";
+        more.className = "library-back library-more";
+        more.textContent = `Show all ${items.length}`;
+        more.addEventListener("click", () => {
+          results.replaceChildren(...items.map(item => mediaResult(item, status)));
+        });
+        results.append(more);
+      }
+    } catch (error) {
+      if (ticket !== historyRequest) return;
+      status.textContent = `Couldn’t load this list. ${mediaError(error)}`;
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "library-back";
+      retry.textContent = "Try again";
+      retry.addEventListener("click", loadPersonalLibrary);
+      results.append(retry);
+    }
+  }));
+}
+
+function mediaResult(item, status) {
   const row = document.createElement("article");
   row.className = "movie-result";
+  const isSeries = item.type === "Series";
+  const isEpisode = item.type === "Episode";
+  row.classList.toggle("episode-result", isEpisode);
 
-  let poster;
-  if (movie.has_image) {
-    poster = document.createElement("img");
+  if (!isEpisode) {
+    const poster = document.createElement(item.has_image ? "img" : "div");
     poster.className = "movie-poster";
-    poster.alt = "";
-    poster.loading = "lazy";
-    poster.src = `/api/jellyfin/movies/${movie.id}/artwork`;
-    poster.addEventListener("error", () => {
-      const fallback = document.createElement("div");
-      fallback.className = "movie-poster";
-      fallback.textContent = "No art";
-      poster.replaceWith(fallback);
-    }, { once: true });
-  } else {
-    poster = document.createElement("div");
-    poster.className = "movie-poster";
-    poster.textContent = "No art";
+    if (item.has_image) {
+      poster.alt = "";
+      poster.loading = "lazy";
+      poster.src = `/api/jellyfin/movies/${item.id}/artwork`;
+      poster.addEventListener("error", () => {
+        const fallback = document.createElement("div");
+        fallback.className = "movie-poster";
+        fallback.textContent = "No art";
+        poster.replaceWith(fallback);
+      }, { once: true });
+    } else poster.textContent = "No art";
+    row.append(poster);
   }
 
   const info = document.createElement("div");
   info.className = "movie-info";
   const title = document.createElement("span");
   title.className = "movie-title";
-  title.textContent = movie.title;
+  title.textContent = isEpisode && item.series_title
+    ? `${item.series_title} — ${item.title}` : item.title;
   const details = document.createElement("span");
   details.className = "movie-year num";
-  details.textContent = [
-    movie.year,
-    movie.rating === null ? null : `${movie.rating} rating`,
-  ].filter(Boolean).join(" · ") || "Movie";
+  details.textContent = isEpisode
+    ? `Season ${item.season_number ?? "?"} · Episode ${item.episode_number ?? "?"}`
+    : [isSeries ? "TV show" : "Movie", item.year, item.played ? "Watched" : null,
+      item.rating == null ? null : `${item.rating} rating`].filter(Boolean).join(" · ");
   info.append(title, details);
 
-  const play = document.createElement("button");
-  play.type = "button";
-  play.className = "movie-play";
-  play.textContent = "Play";
-  play.setAttribute("aria-label", `Play ${movie.title} on the TV`);
-  play.addEventListener("click", () =>
-    act(play, async () => {
-      try {
-        const response = await api("/api/jellyfin/play", { item_id: movie.id });
-        $("#movie-search-status").textContent = response.tv_ready
-          ? `Starting ${movie.title} on the TV…`
-          : `${movie.title} is starting; switch the TV to Jellyfin if needed.`;
-        scheduleRefresh(900);
-      } catch (error) {
-        $("#movie-search-status").textContent = `Couldn’t start that movie: ${error.message}`;
-        throw error;
-      }
-    }));
-
-  row.append(poster, info, play);
+  const actions = document.createElement("div");
+  actions.className = "media-actions";
+  const action = document.createElement("button");
+  action.type = "button";
+  action.className = "movie-play";
+  const resume = !isSeries && Number.isFinite(item.resume_seconds) && item.resume_seconds > 0;
+  action.textContent = isSeries ? "Episodes" : (resume ? `Resume ${mediaTime(item.resume_seconds)}` : "Play on TV");
+  action.setAttribute("aria-label", isSeries
+    ? `Choose an episode of ${item.title}` : `${resume ? "Resume" : "Play"} ${item.title} on the TV`);
+  if (!isSeries) {
+    action.dataset.start = "1";
+    action.disabled = playbackPending;
+  }
+  action.addEventListener("click", () => {
+    if (isSeries) openSeries(item, action);
+    else startMedia(item, status, false);
+  });
+  actions.append(action);
+  if (resume) {
+    const restart = document.createElement("button");
+    restart.type = "button";
+    restart.className = "media-restart";
+    restart.dataset.start = "1";
+    restart.disabled = playbackPending;
+    restart.textContent = "Start over";
+    restart.setAttribute("aria-label", `Start ${item.title} from the beginning on the TV`);
+    restart.addEventListener("click", () => startMedia(item, status, true));
+    actions.append(restart);
+  }
+  row.append(info, actions);
   return row;
+}
+
+let activeSeries = null;
+let seriesTrigger = null;
+let libraryRequest = 0;
+let episodeRequest = 0;
+
+function closeSeries() {
+  activeSeries = null;
+  episodeRequest += 1;
+  $("#series-browser").hidden = true;
+  $("#movie-results").hidden = false;
+}
+
+async function loadEpisodes() {
+  const ticket = ++episodeRequest;
+  const series = activeSeries;
+  const seasonId = $("#series-season").value;
+  const status = $("#episode-status");
+  const results = $("#episode-results");
+  results.replaceChildren();
+  if (!series || !seasonId) return;
+  status.textContent = "Loading episodes…";
+  try {
+    const response = await libraryGet(
+      `/api/jellyfin/series/${series.id}/episodes?season_id=${encodeURIComponent(seasonId)}`);
+    if (ticket !== episodeRequest) return;
+    results.replaceChildren(...response.episodes.map(item => mediaResult({ ...item, type: "Episode" }, status)));
+    status.textContent = response.episodes.length
+      ? "Choose an episode to play on the TV." : "No episodes in this season are in your library.";
+  } catch (error) {
+    if (ticket === episodeRequest) status.textContent = mediaError(error);
+  }
+}
+
+async function openSeries(series, trigger) {
+  const ticket = ++libraryRequest;
+  episodeRequest += 1;
+  activeSeries = series;
+  seriesTrigger = trigger;
+  $("#movie-results").hidden = true;
+  $("#series-browser").hidden = false;
+  $("#series-title").textContent = series.title;
+  $("#series-title").focus();
+  const select = $("#series-season");
+  const status = $("#episode-status");
+  select.replaceChildren();
+  select.disabled = true;
+  $("#episode-results").replaceChildren();
+  status.textContent = "Loading seasons…";
+  try {
+    const response = await libraryGet(`/api/jellyfin/series/${series.id}/seasons`);
+    if (ticket !== libraryRequest || activeSeries !== series) return;
+    response.seasons.forEach(season => {
+      const option = document.createElement("option");
+      option.value = season.id;
+      option.textContent = season.title || (season.number === 0 ? "Specials" : `Season ${season.number}`);
+      select.append(option);
+    });
+    const firstSeason = response.seasons.find(season => season.number > 0);
+    if (firstSeason) select.value = firstSeason.id;
+    select.disabled = !response.seasons.length;
+    status.textContent = response.seasons.length ? "" : "No seasons are in your library yet.";
+    if (response.seasons.length) await loadEpisodes();
+  } catch (error) {
+    if (ticket === libraryRequest && activeSeries === series) status.textContent = mediaError(error);
+  }
 }
 
 const movieSearchForm = $("#movie-search-form");
 if (movieSearchForm) {
-  movieSearchForm.addEventListener("submit", (event) => {
+  const status = $("#movie-search-status");
+  const results = $("#movie-results");
+  const heading = $("#movie-results-title");
+  async function loadLibrary(query = "") {
+    const ticket = ++libraryRequest;
+    closeSeries();
+    status.textContent = query ? "Searching…" : "Loading your library…";
+    results.replaceChildren();
+    try {
+      const response = query
+        ? await api("/api/jellyfin/search", { query })
+        : await libraryGet("/api/jellyfin/recent");
+      if (ticket !== libraryRequest) return;
+      results.replaceChildren(...response.items.map(item => mediaResult(item, status)));
+      heading.textContent = query ? `Results for “${query}”` : "Recently added";
+      status.textContent = response.items.length
+        ? (query ? `${response.items.length} results. Choose a movie or TV show.` : "Choose a movie or TV show to play.")
+        : (query ? "No matching movies or TV shows in your library." : "No movies or TV shows in your library yet.");
+    } catch (error) {
+      if (ticket === libraryRequest) status.textContent = mediaError(error);
+    }
+  }
+  movieSearchForm.addEventListener("submit", event => {
     event.preventDefault();
     const query = $("#movie-query").value.trim();
-    const button = $("#movie-search-button");
-    const status = $("#movie-search-status");
-    const results = $("#movie-results");
-    const heading = $("#movie-results-title");
-    if (query.length < 2) {
-      status.textContent = "Enter at least two characters.";
-      return;
-    }
-    act(button, async () => {
-      status.textContent = "Searching…";
-      results.replaceChildren();
-      try {
-        const response = await api("/api/jellyfin/search", { query });
-        response.movies.forEach((movie) => results.append(movieResult(movie)));
-        if (heading) heading.textContent = `Results for “${query}”`;
-        status.textContent = response.movies.length
-          ? `${response.movies.length} ${response.movies.length === 1 ? "movie" : "movies"} found.`
-          : "No matching movies.";
-      } catch (error) {
-        status.textContent = "Search is unavailable right now. Try again.";
-        throw error;
-      }
-    });
+    if (query && query.length < 2) { status.textContent = "Enter at least two characters."; return; }
+    loadLibrary(query);
   });
-
-  const loadRecent = async () => {
-    const status = $("#movie-search-status");
-    const results = $("#movie-results");
-    const heading = $("#movie-results-title");
-    try {
-      const res = await fetch("/api/jellyfin/recent", { cache: "no-store" });
-      if (res.status === 401) { location.href = "/login"; return; }
-      if (!res.ok) throw new Error(String(res.status));
-      const response = await res.json();
-      results.replaceChildren(...response.movies.map(movieResult));
-      if (heading) heading.textContent = "Recently added";
-      status.textContent = response.movies.length
-        ? `${response.movies.length} movies ready to play.`
-        : "No movies in the library yet.";
-    } catch {
-      status.textContent = "Your movie library is unavailable right now.";
-    }
-  };
-  loadRecent();
-  $("#movie-query").addEventListener("search", (event) => {
-    if (!event.target.value) loadRecent();
+  $("#series-back").addEventListener("click", () => {
+    libraryRequest += 1;
+    closeSeries();
+    seriesTrigger?.focus();
   });
+  $("#series-season").addEventListener("change", loadEpisodes);
+  $("#movie-query").addEventListener("search", event => {
+    if (!event.target.value) loadLibrary();
+  });
+  loadLibrary();
 }
 
 const jellyPoster = $("#jelly-poster");
-if (jellyPoster) jellyPoster.addEventListener("error", () => { jellyPoster.hidden = true; });
+if (jellyPoster) jellyPoster.addEventListener("error", () => {
+  jellyPoster.dataset.failedItem = jellyPoster.dataset.itemId || "";
+  jellyPoster.hidden = true;
+});
+
+const playerConnect = $("#player-connect");
+if (playerConnect) playerConnect.addEventListener("click", () => act(playerConnect, async () => {
+  try {
+    if (playerConnect.dataset.recovery === "connect") {
+      const response = await api("/api/jellyfin/connect");
+      if (!response.tv_ready) throw new Error("The TV didn’t answer. Use its remote to switch to Jellyfin, then check again.");
+    }
+    await refresh();
+  } catch (error) {
+    $("#connection-help").textContent = mediaError(error);
+    throw error;
+  }
+}));
+
+const seekControl = $("#jelly-seek");
+if (seekControl) {
+  const beginSeek = () => {
+    if (seekControl.disabled) return;
+    if (!seekDragging) seekItemId = currentJellyfin?.item_id;
+    seekDragging = true;
+  };
+  seekControl.addEventListener("pointerdown", beginSeek);
+  seekControl.addEventListener("keydown", event => {
+    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(event.key)) beginSeek();
+  });
+  seekControl.addEventListener("input", () => {
+    beginSeek();
+    $("#jellyposition").textContent = mediaTime(Number(seekControl.value));
+    seekControl.setAttribute("aria-valuetext", `${mediaTime(Number(seekControl.value))} of ${mediaTime(Number(seekControl.max))}`);
+  });
+  const cancelSeek = () => { seekDragging = false; seekItemId = null; };
+  seekControl.addEventListener("pointerup", () => setTimeout(cancelSeek, 0));
+  seekControl.addEventListener("blur", cancelSeek);
+  seekControl.addEventListener("pointercancel", () => { cancelSeek(); refresh(); });
+  seekControl.addEventListener("change", async () => {
+    const itemId = seekItemId;
+    const seconds = Number(seekControl.value);
+    seekDragging = false;
+    seekItemId = null;
+    if (!itemId) return;
+    seekHoldUntil = Date.now() + 1500;
+    $("#seek-status").textContent = `Seeking to ${mediaTime(seconds)}…`;
+    try {
+      await api("/api/jellyfin/seek", { item_id: itemId, seconds });
+      $("#seek-status").textContent = `Seek requested at ${mediaTime(seconds)}.`;
+      scheduleRefresh(1600);
+    } catch (error) {
+      seekHoldUntil = 0;
+      $("#seek-status").textContent = mediaError(error);
+      refresh();
+    }
+  });
+}
 
 const audioSelect = $("#audio-select");
 if (audioSelect) audioSelect.addEventListener("change", () =>
