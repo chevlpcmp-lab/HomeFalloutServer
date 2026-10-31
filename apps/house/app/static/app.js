@@ -718,7 +718,16 @@ async function refreshVisibleAvailability() {
       if (ticket !== availabilityRefreshTicket) return;
       updateVisibleItems(history.items);
     }
-  } catch { /* regular state refresh and the next poll will retry */ }
+  } catch {
+    if (ticket === availabilityRefreshTicket) {
+      $$('.movie-result').forEach(row => {
+        const item = row._mediaItem;
+        if (item?.playable === false && item.type !== "Series") {
+          renderAvailability(row, { ...item, availability: { state: "unknown", message: "Status unavailable. Checking again…" } });
+        }
+      });
+    }
+  }
   finally { availabilityRefreshInFlight = false; }
 }
 
