@@ -80,7 +80,8 @@ mounts it at `/mnt/data`:
 
 Use `/data/downloads` and `/data/library` in qBittorrent and the Arr applications. Downloads and
 the library share one filesystem, allowing Radarr, Sonarr, and Mylar to hardlink instead of
-copying. Jellyfin sees the library read-only at `/media/library`; Komga sees it read-only at
+copying. Jellyfin has read/write access at `/media/library` so authorized users can delete media
+from its interface; Komga sees the library read-only at
 `/data/library`. Comic torrents complete into `downloads/complete/comics` (Mylar imports by
 watching that folder, so it must not see Radarr/Sonarr payloads) and Mylar's GetComics direct
 downloads stage in `downloads/ddl`.
@@ -101,7 +102,7 @@ flowchart LR
     Sonarr["Sonarr"] --> TV
     Mylar["Mylar"] --> Comics
     Mylar --> DDL["downloads/ddl"] --> Comics
-    Jellyfin["Jellyfin · read-only"] --> Movies
+    Jellyfin["Jellyfin · read/write"] --> Movies
     Jellyfin --> TV
     Komga["Komga · read-only"] --> Comics
 ```

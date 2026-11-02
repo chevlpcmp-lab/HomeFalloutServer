@@ -55,7 +55,7 @@ spec:
           volumeMounts:
             - { name: config, mountPath: /config }
             - { name: cache, mountPath: /cache }
-            - { name: media-data, mountPath: /media, readOnly: true }
+            - { name: media-data, mountPath: /media, readOnly: false }
           resources:
             requests: { cpu: 300m, memory: 768Mi }
             limits: { cpu: "4", memory: 3Gi }
